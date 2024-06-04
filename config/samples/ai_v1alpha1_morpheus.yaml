@@ -1,0 +1,12 @@
+apiVersion: ai.redhat.com/v1alpha1
+kind: Morpheus
+metadata:
+  labels:
+    app.kubernetes.io/name: morpheus
+    app.kubernetes.io/instance: morpheus-sample
+    app.kubernetes.io/part-of: morpheus-operator
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: morpheus-operator
+  name: morpheus-sample
+spec:
+  # TODO(user): Add fields here
