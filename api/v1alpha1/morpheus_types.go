@@ -28,8 +28,9 @@ type MorpheusSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// Foo is an example field of Morpheus. Edit morpheus_types.go to remove/update
+	// Service account of running all deployments of Morpheus. Edit morpheus_types.go to remove/update
 	ServiceAccountName string `json:"ServiceAccountName,omitempty"`
+	AutoBindSccToSa    bool   `json:"autoBindSccToSa,omitempty"`
 }
 
 // MorpheusStatus defines the observed state of Morpheus
