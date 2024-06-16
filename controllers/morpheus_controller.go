@@ -18,6 +18,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -153,27 +154,125 @@ func (r *MorpheusReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	err = deployTritonServer(r, ctx, morpheus, log)
+	if err != nil {
+		log.Error(err, "Failed to Deploy Triton Server")
+		return ctrl.Result{}, err
+	}
 	err = deployMilvusDB(r, ctx, morpheus, log)
-
+	if err != nil {
+		log.Error(err, "Failed to Deploy MilvusDB")
+		return ctrl.Result{}, err
+	}
 	return ctrl.Result{}, nil
 }
 
 func deployMilvusDB(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha1.Morpheus, log logr.Logger) error {
+	const milvusEctdPvcName = "milvus-etcd-data"
+	const milvusEctdName = "milvus-etcd"
+	const milvusMinioPvcName = "milvus-minio-data"
+	const milvusMinioName = "milvus-minio"
+	const milvusPvcDataName = "milvus-data"
+	const minioPort = 9000
+	const etcdPort = 2379
 
-	err := deployMinio(r, ctx, morpheus, log)
-	err := deployEtcd(r, ctx, morpheus, log)
-
+	err := deployMinio(r, ctx, morpheus, log, milvusMinioPvcName, milvusMinioName, minioPort)
+	if err != nil {
+		log.Error(err, "Failed to get deploy minio object storage store")
+		return err
+	}
+	err = deployEtcd(r, ctx, morpheus, log, milvusEctdPvcName, milvusEctdName, 2379)
+	if err != nil {
+		log.Error(err, "Failed to get deploy etcd key-value store")
+		return err
+	}
 	//Deploy Milvus Vector DB
+	milvusPvc := &corev1.PersistentVolumeClaim{}
+	err = r.Get(ctx, types.NamespacedName{Name: milvusPvcDataName, Namespace: morpheus.Namespace}, milvusPvc)
+
+	if err != nil && errors.IsNotFound(err) {
+		// Define a new PVC
+		var pvcMilvus *corev1.PersistentVolumeClaim
+		pvcMilvus = r.createPvc(morpheus, milvusPvcDataName, "2Gi")
+		log.Info("Creating a new Pvc for Milvus Data", "Pvc.Namespace", pvcMilvus.Namespace, "Pvc.Name", pvcMilvus.Name)
+		err = r.Create(ctx, pvcMilvus)
+		if err != nil {
+			log.Error(err, "Failed to create Pvc for Milvus", "Pvc.Namespace", pvcMilvus.Namespace, "Pvc.Name", pvcMilvus.Name)
+			return err
+		}
+	} else if err != nil {
+		log.Error(err, "Failed to get milvus data PVC ")
+		return err
+	}
+	// Create an Etcd Deployment
+	milvusDeployment := &appsv1.Deployment{}
+	err = r.Get(ctx, types.NamespacedName{Name: milvusEctdName, Namespace: morpheus.Namespace}, milvusDeployment)
+
+	if err != nil && errors.IsNotFound(err) {
+		// Define a new deployment
+		var deploymentMilvus *appsv1.Deployment
+		minioUrl := fmt.Sprintf("%s:%s", milvusMinioName, minioPort)
+		etcdUrl := fmt.Sprintf("%s:%s", milvusEctdName, etcdPort)
+		deploymentMilvus = r.createMilvusDbDeployment(morpheus, milvusPvcDataName, minioUrl, etcdUrl)
+		log.Info("Creating a new Deployment", "Deployment.Namespace", deploymentMilvus.Namespace, "Deployment.Name", deploymentMilvus.Name)
+		err = r.Create(ctx, deploymentMilvus)
+		if err != nil {
+			log.Error(err, "Failed to create new milvus-standalone Deployment", "Deployment.Namespace", deploymentMilvus.Namespace, "Deployment.Name", deploymentMilvus.Name)
+			return err
+		}
+	} else if err != nil {
+		log.Error(err, "Failed to get Milvus Deployment")
+		return err
+	}
+
+	// Create A Milvus Service
+	milvusService := &corev1.Service{}
+	const milvusName = "milvus-standalone"
+	err = r.Get(ctx, types.NamespacedName{Name: milvusName, Namespace: morpheus.Namespace}, milvusService)
+
+	if err != nil && errors.IsNotFound(err) {
+		// Define a new Service
+		var serviceMilvus *corev1.Service
+		ports := []corev1.ServicePort{
+			{
+				Name:     "grpc",
+				Protocol: corev1.ProtocolTCP,
+				Port:     19530,
+				TargetPort: intstr.IntOrString{
+					StrVal: "19530",
+				},
+			},
+			{
+				Name:     "api",
+				Protocol: corev1.ProtocolTCP,
+				Port:     9091,
+				TargetPort: intstr.IntOrString{
+					StrVal: "9091",
+				},
+			},
+		}
+		selector := map[string]string{
+			"app":       "milvus",
+			"component": "milvus",
+		}
+		serviceMilvus = r.createService(morpheus, ports, milvusName, selector)
+		log.Info("Creating a new Milvus Service", "Service.Namespace", serviceMilvus.Namespace, "Service.Name", serviceMilvus.Name)
+		err = r.Create(ctx, serviceMilvus)
+		if err != nil {
+			log.Error(err, "Failed to create new Milvus Service", "Service.Namespace", serviceMilvus.Namespace, "Service.Name", serviceMilvus.Name)
+			return err
+		}
+	} else if err != nil {
+		log.Error(err, "Failed to get Milvus Service")
+		return err
+	}
 
 	return nil
 }
 
-func deployEtcd(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha1.Morpheus, log logr.Logger) error {
-	// Create a Persistent volume claim to store etcd data for milvus db.
+func deployEtcd(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha1.Morpheus, log logr.Logger, milvusEctdPvcName string, milvusEctdName string, etcdPort int) error {
 
+	// Create a Persistent volume claim to store etcd data for milvus db.
 	morpheusRepoPvc := &corev1.PersistentVolumeClaim{}
-	const milvusEctdPvcName = "milvus-etcd-data"
-	const milvusEctdName = "milvus-etcd"
 	err := r.Get(ctx, types.NamespacedName{Name: milvusEctdPvcName, Namespace: morpheus.Namespace}, morpheusRepoPvc)
 
 	if err != nil && errors.IsNotFound(err) {
@@ -190,6 +289,24 @@ func deployEtcd(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha1
 		log.Error(err, "Failed to get milvus etcd data PVC ")
 		return err
 	}
+	// Create an Etcd Deployment
+	etcdDeployment := &appsv1.Deployment{}
+	err = r.Get(ctx, types.NamespacedName{Name: milvusEctdName, Namespace: morpheus.Namespace}, etcdDeployment)
+
+	if err != nil && errors.IsNotFound(err) {
+		// Define a new deployment
+		var deploymentEtcd *appsv1.Deployment
+		deploymentEtcd = r.createEtcdDeployment(morpheus, milvusEctdPvcName, milvusEctdName)
+		log.Info("Creating a new Deployment", "Deployment.Namespace", deploymentEtcd.Namespace, "Deployment.Name", deploymentEtcd.Name)
+		err = r.Create(ctx, deploymentEtcd)
+		if err != nil {
+			log.Error(err, "Failed to create new milvus-etcd Deployment", "Deployment.Namespace", deploymentEtcd.Namespace, "Deployment.Name", deploymentEtcd.Name)
+			return err
+		}
+	} else if err != nil {
+		log.Error(err, "Failed to get Etcd Deployment")
+		return err
+	}
 
 	// Create an Etcd Service
 	etcdService := &corev1.Service{}
@@ -201,9 +318,9 @@ func deployEtcd(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha1
 		ports := []corev1.ServicePort{{
 			Name:     "grpc",
 			Protocol: corev1.ProtocolTCP,
-			Port:     8001,
+			Port:     int32(etcdPort),
 			TargetPort: intstr.IntOrString{
-				StrVal: "8001",
+				StrVal: string(etcdPort),
 			},
 		},
 		}
@@ -226,8 +343,85 @@ func deployEtcd(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha1
 	return nil
 }
 
-func deployMinio(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha1.Morpheus, log logr.Logger) error {
+func deployMinio(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha1.Morpheus, log logr.Logger, milvusMinioPvcName string, milvusMinioName string, minioPort int) error {
+	// Create a Persistent volume claim to store minio data for milvus db.
 
+	minioPvc := &corev1.PersistentVolumeClaim{}
+	err := r.Get(ctx, types.NamespacedName{Name: milvusMinioPvcName, Namespace: morpheus.Namespace}, minioPvc)
+
+	if err != nil && errors.IsNotFound(err) {
+		// Define a new pvc
+		var pvcMinio *corev1.PersistentVolumeClaim
+		pvcMinio = r.createPvc(morpheus, milvusMinioPvcName, "2Gi")
+		log.Info("Creating a new Pvc for Minio Data", "Pvc.Namespace", pvcMinio.Namespace, "Pvc.Name", pvcMinio.Name)
+		err = r.Create(ctx, pvcMinio)
+		if err != nil {
+			log.Error(err, "Failed to create Pvc for Minio Instance", "Pvc.Namespace", pvcMinio.Namespace, "Pvc.Name", pvcMinio.Name)
+			return err
+		}
+	} else if err != nil {
+		log.Error(err, "Failed to get milvus minio data PVC ")
+		return err
+	}
+	// Create a minio Deployment
+	minioDeployment := &appsv1.Deployment{}
+	err = r.Get(ctx, types.NamespacedName{Name: milvusMinioName, Namespace: morpheus.Namespace}, minioDeployment)
+
+	if err != nil && errors.IsNotFound(err) {
+		// Define a new deployment
+		var deploymentMinio *appsv1.Deployment
+		deploymentMinio = r.createMinioDeployment(morpheus, milvusMinioPvcName, milvusMinioName)
+		log.Info("Creating a new Deployment", "Deployment.Namespace", deploymentMinio.Namespace, "Deployment.Name", deploymentMinio.Name)
+		err = r.Create(ctx, deploymentMinio)
+		if err != nil {
+			log.Error(err, "Failed to create new milvus-minio Deployment", "Deployment.Namespace", deploymentMinio.Namespace, "Deployment.Name", deploymentMinio.Name)
+			return err
+		}
+	} else if err != nil {
+		log.Error(err, "Failed to get Minio Deployment")
+		return err
+	}
+
+	// Create a minio Service
+	minioService := &corev1.Service{}
+	err = r.Get(ctx, types.NamespacedName{Name: milvusMinioName, Namespace: morpheus.Namespace}, minioService)
+
+	if err != nil && errors.IsNotFound(err) {
+		// Define a new Service
+		var serviceMinio *corev1.Service
+		ports := []corev1.ServicePort{
+			{
+				Name:     "api",
+				Protocol: corev1.ProtocolTCP,
+				Port:     int32(minioPort),
+				TargetPort: intstr.IntOrString{
+					StrVal: string(minioPort),
+				},
+			},
+			{
+				Name:     "console",
+				Protocol: corev1.ProtocolTCP,
+				Port:     9001,
+				TargetPort: intstr.IntOrString{
+					StrVal: "9001",
+				},
+			},
+		}
+		selector := map[string]string{
+			"app":       "milvus",
+			"component": "minio",
+		}
+		serviceMinio = r.createService(morpheus, ports, milvusMinioName, selector)
+		log.Info("Creating a new minio Service", "Service.Namespace", serviceMinio.Namespace, "Service.Name", serviceMinio.Name)
+		err = r.Create(ctx, serviceMinio)
+		if err != nil {
+			log.Error(err, "Failed to create new minio Service", "Service.Namespace", serviceMinio.Namespace, "Service.Name", serviceMinio.Name)
+			return err
+		}
+	} else if err != nil {
+		log.Error(err, "Failed to get Etcd Service")
+		return err
+	}
 	return nil
 }
 
@@ -324,7 +518,7 @@ func deployTritonServer(r *MorpheusReconciler, ctx context.Context, morpheus *ai
 
 // deploymentForMemcached returns a memcached Deployment object
 func (r *MorpheusReconciler) createMorpheusDeployment(m *aiv1alpha1.Morpheus) *appsv1.Deployment {
-	labels := labelsForComponent("morpheus", "v24.03.02")
+	labels := labelsForComponent("morpheus", "v24.03.02", "")
 	var numOfReplicas int32 = 1
 	var user int64 = 0
 
@@ -362,8 +556,12 @@ func (r *MorpheusReconciler) createMorpheusDeployment(m *aiv1alpha1.Morpheus) *a
 	return dep
 }
 
-func labelsForComponent(name string, version string) map[string]string {
-	return map[string]string{"app": name, "version": version}
+func labelsForComponent(name string, version string, component string) map[string]string {
+	mapOfLabels := map[string]string{"app": name, "version": version}
+	if component != "" {
+		mapOfLabels["component"] = component
+	}
+	return mapOfLabels
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -450,12 +648,12 @@ func (r *MorpheusReconciler) createPvc(morpheus *aiv1alpha1.Morpheus, pvcName st
 }
 
 func (r *MorpheusReconciler) createTritonDeployment(morpheus *aiv1alpha1.Morpheus) *appsv1.Deployment {
-	labels := labelsForComponent("triton-server", "v23.06")
+	labels := labelsForComponent("triton-server", "v23.06", "")
 	var numOfReplicas int32 = 1
 
 	dep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      morpheus.Name,
+			Name:      "triton-server",
 			Namespace: morpheus.Namespace,
 		},
 		Spec: appsv1.DeploymentSpec{
@@ -474,6 +672,13 @@ func (r *MorpheusReconciler) createTritonDeployment(morpheus *aiv1alpha1.Morpheu
 						Command: []string{"tritonserver", "--model-repository=/repo/Morpheus/models/triton-model-repo",
 							"--exit-on-error=false", "--strict-readiness=false",
 							"--disable-auto-complete-config", "--log-info=true"},
+					}},
+					InitContainers: []corev1.Container{{
+						Name:  "fetch-models",
+						Image: "nvcr.io/nvidia/tritonserver:23.06",
+						Command: []string{"bash", "-c", "(curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | bash)" +
+							" && apt-get install git-lfs && git clone https://github.com/nv-morpheus/Morpheus.git /repo/Morpheus &&" +
+							"cd /repo/Morpheus && ./scripts/fetch_data.py fetch models "},
 					}},
 				},
 			},
@@ -498,4 +703,288 @@ func (r *MorpheusReconciler) createService(morpheus *aiv1alpha1.Morpheus, ports 
 	}
 	ctrl.SetControllerReference(morpheus, svc, r.Scheme)
 	return svc
+}
+
+func (r *MorpheusReconciler) createEtcdDeployment(morpheus *aiv1alpha1.Morpheus, milvusEtcdData string, milvusEctdName string) *appsv1.Deployment {
+	labels := labelsForComponent("milvus", "v3.5.5", "etcd")
+	var numOfReplicas int32 = 1
+
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      milvusEctdName,
+			Namespace: morpheus.Namespace,
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &numOfReplicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: labels,
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+				},
+				Spec: corev1.PodSpec{
+					Volumes: []corev1.Volume{{
+						Name: "etcd-data",
+						VolumeSource: corev1.VolumeSource{
+							PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+								ClaimName: milvusEtcdData,
+							},
+						},
+					}},
+					Containers: []corev1.Container{{
+						Name:    "etcd",
+						Image:   "quay.io/coreos/etcd:v3.5.5",
+						Command: []string{"etcd"},
+						Ports: []corev1.ContainerPort{{
+							Name:          "service",
+							ContainerPort: 2379,
+							Protocol:      "TCP",
+						}},
+						Env: []corev1.EnvVar{{
+							Name:  "ETCD_AUTO_COMPACTION_MODE",
+							Value: "revision",
+						},
+							{
+								Name:  "ETCD_AUTO_COMPACTION_RETENTION",
+								Value: "1000",
+							},
+							{
+								Name:  "ETCD_QUOTA_BACKEND_BYTES",
+								Value: "4294967296",
+							},
+							{
+								Name:  "ETCD_SNAPSHOT_COUNT",
+								Value: "50000",
+							},
+							{
+								Name:  "ETCD_LISTEN_CLIENT_URLS",
+								Value: "http://0.0.0.0:2379",
+							},
+							{
+								Name:  "ETCD_ADVERTISE_CLIENT_URLS",
+								Value: "http://127.0.0.1:2379",
+							},
+							{
+								Name:  "ETCD_DATA_DIR",
+								Value: "/etcd",
+							},
+						},
+						VolumeMounts: []corev1.VolumeMount{{
+							Name:      "etcd-data",
+							MountPath: "/etcd",
+						}},
+						LivenessProbe: &corev1.Probe{
+							ProbeHandler: corev1.ProbeHandler{
+								Exec: &corev1.ExecAction{
+									Command: []string{"etcdctl", "endpoint", "health"},
+								},
+							},
+							InitialDelaySeconds: 2,
+						},
+						ReadinessProbe: &corev1.Probe{
+							ProbeHandler: corev1.ProbeHandler{
+								Exec: &corev1.ExecAction{
+									Command: []string{"etcdctl", "endpoint", "health"},
+								},
+							},
+							InitialDelaySeconds: 2,
+						},
+					}},
+				},
+			},
+		},
+	}
+
+	// Set Morpheus instance as the owner and controller
+	ctrl.SetControllerReference(morpheus, dep, r.Scheme)
+	return dep
+}
+func (r *MorpheusReconciler) createMinioDeployment(morpheus *aiv1alpha1.Morpheus, MilvusPvc string, milvusMinioName string) *appsv1.Deployment {
+	labels := labelsForComponent("milvus", "v3.5.5", "minio")
+	var numOfReplicas int32 = 1
+
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      milvusMinioName,
+			Namespace: morpheus.Namespace,
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &numOfReplicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: labels,
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+				},
+				Spec: corev1.PodSpec{
+					Volumes: []corev1.Volume{{
+						Name: "minio-data",
+						VolumeSource: corev1.VolumeSource{
+							PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+								ClaimName: MilvusPvc,
+							},
+						},
+					}},
+					Containers: []corev1.Container{{
+						Name:    "minio",
+						Image:   "minio/minio:RELEASE.2023-03-20T20-16-18Z",
+						Command: []string{"minio", "server", "/minio_data", "--console-address", ":9001"},
+						Ports: []corev1.ContainerPort{
+							{
+								Name:          "api",
+								ContainerPort: 9000,
+								Protocol:      "TCP",
+							},
+							{
+								Name:          "console",
+								ContainerPort: 9001,
+								Protocol:      "TCP",
+							},
+						},
+						Env: []corev1.EnvVar{
+							{
+								Name:  "MINIO_ROOT_USER",
+								Value: "admin",
+							},
+							{
+								Name:  "MINIO_ROOT_PASSWORD",
+								Value: "admin123!",
+							},
+						},
+						VolumeMounts: []corev1.VolumeMount{{
+							Name:      "minio-data",
+							MountPath: "/minio_data",
+						}},
+						LivenessProbe: &corev1.Probe{
+							ProbeHandler: corev1.ProbeHandler{
+								HTTPGet: &corev1.HTTPGetAction{
+									Path: "/minio/health/live",
+									Port: intstr.IntOrString{
+										IntVal: 9000,
+									},
+								},
+							},
+							InitialDelaySeconds: 2,
+						},
+						ReadinessProbe: &corev1.Probe{
+							ProbeHandler: corev1.ProbeHandler{
+								HTTPGet: &corev1.HTTPGetAction{
+									Path: "/minio/health/live",
+									Port: intstr.IntOrString{
+										IntVal: 9000,
+									},
+								},
+							},
+							InitialDelaySeconds: 2,
+						},
+					}},
+				},
+			},
+		},
+	}
+
+	// Set Morpheus instance as the owner and controller
+	ctrl.SetControllerReference(morpheus, dep, r.Scheme)
+	return dep
+}
+func (r *MorpheusReconciler) createMilvusDbDeployment(morpheus *aiv1alpha1.Morpheus, MilvusPvc string, minioServiceUrl string, etcdServiceUrl string) *appsv1.Deployment {
+	labels := labelsForComponent("milvus", "v2.4.1", "milvus")
+	var numOfReplicas int32 = 1
+
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "milvus-standalone",
+			Namespace: morpheus.Namespace,
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &numOfReplicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: labels,
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+				},
+				Spec: corev1.PodSpec{
+					Volumes: []corev1.Volume{{
+						Name: "milvus-data",
+						VolumeSource: corev1.VolumeSource{
+							PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+								ClaimName: MilvusPvc,
+							},
+						},
+					}},
+					Containers: []corev1.Container{{
+						Name:    "milvus",
+						Image:   "milvusdb/milvus:v2.4.1",
+						Command: []string{"milvus", "run", "standalone"},
+						Ports: []corev1.ContainerPort{
+							{
+								Name:          "grpc",
+								ContainerPort: 19530,
+								Protocol:      "TCP",
+							},
+							{
+								Name:          "api",
+								ContainerPort: 9091,
+								Protocol:      "TCP",
+							},
+						},
+						Env: []corev1.EnvVar{
+							{
+								Name:  "MINIO_ADDRESS",
+								Value: minioServiceUrl,
+							},
+
+							{
+								Name:  "ETCD_ENDPOINTS",
+								Value: etcdServiceUrl,
+							},
+
+							{
+								Name:  "MINIO_ACCESS_KEY_ID",
+								Value: "admin",
+							},
+							{
+								Name:  "MINIO_SECRET_ACCESS_KEYad",
+								Value: "admin123!",
+							},
+						},
+						VolumeMounts: []corev1.VolumeMount{{
+							Name:      "milvus-data",
+							MountPath: "/var/lib/milvus",
+						}},
+						LivenessProbe: &corev1.Probe{
+							ProbeHandler: corev1.ProbeHandler{
+								HTTPGet: &corev1.HTTPGetAction{
+									Path: "/healthz",
+									Port: intstr.IntOrString{
+										IntVal: 9091,
+									},
+								},
+							},
+							InitialDelaySeconds: 2,
+						},
+						ReadinessProbe: &corev1.Probe{
+							ProbeHandler: corev1.ProbeHandler{
+								HTTPGet: &corev1.HTTPGetAction{
+									Path: "/healthz",
+									Port: intstr.IntOrString{
+										IntVal: 9091,
+									},
+								},
+							},
+							InitialDelaySeconds: 2,
+						},
+					}},
+				},
+			},
+		},
+	}
+
+	// Set Morpheus instance as the owner and controller
+	ctrl.SetControllerReference(morpheus, dep, r.Scheme)
+	return dep
 }
