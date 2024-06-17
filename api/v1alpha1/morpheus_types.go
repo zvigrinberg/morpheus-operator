@@ -23,21 +23,41 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
+type MinioSpec struct {
+	RootUser       string `json:"rootUser"`
+	RootPassword   string `json:"rootPassword"`
+	StoragePvcSize string `json:"storagePvcSize"`
+}
+
+type EtcdSpec struct {
+	StoragePvcSize string `json:"storagePvcSize,omitempty"`
+}
+
+type TritonSpec struct {
+	MorpheusRepoStorageSize string `json:"morpheusRepoStorageSize,omitempty"`
+}
+
+type MilvusSpec struct {
+	Minio          MinioSpec `json:"minio,omitempty"`
+	Etcd           EtcdSpec  `json:"etcd,omitempty"`
+	StoragePvcSize string    `json:"storagePvcSize,omitempty"`
+}
+
 // MorpheusSpec defines the desired state of Morpheus
 type MorpheusSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// Service account of running all deployments of Morpheus. Edit morpheus_types.go to remove/update
-	ServiceAccountName string `json:"ServiceAccountName,omitempty"`
-	AutoBindSccToSa    bool   `json:"autoBindSccToSa,omitempty"`
+	ServiceAccountName string     `json:"ServiceAccountName,omitempty"`
+	AutoBindSccToSa    bool       `json:"autoBindSccToSa,omitempty"`
+	Milvus             MilvusSpec `json:"milvus,omitempty"`
+	TritonServer       TritonSpec `json:"tritonServer"`
 }
 
 // MorpheusStatus defines the observed state of Morpheus
 type MorpheusStatus struct {
 	Conditions []metav1.Condition `json:"conditions"`
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
 }
 
 //+kubebuilder:object:root=true

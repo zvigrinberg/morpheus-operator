@@ -62,7 +62,12 @@ type MorpheusReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.14.1/pkg/reconcile
 func (r *MorpheusReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	thereWasAnUpdate := false
 	ctx = context.Background()
+	const minioAdminDefaultUser = "admin"
+	const minioAdminDefaultPassword = "admin123!"
+	context.WithValue(ctx, "minioDefaultUser", minioAdminDefaultUser)
+	context.WithValue(ctx, "minioDefaultPassword", minioAdminDefaultPassword)
 	log := r.Log.WithValues("morpheus", req.NamespacedName)
 	// Fetch the Memcached instance
 	morpheus := &aiv1alpha1.Morpheus{}
@@ -156,22 +161,38 @@ func (r *MorpheusReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	} else if err != nil {
 		log.Error(err, "Failed to get Morpheus Deployment")
 		return ctrl.Result{}, err
+	} else {
+		serviceAccountDeployment := morpheusDeployment.Spec.Template.Spec.ServiceAccountName
+		if serviceAccountDeployment != morpheus.Spec.ServiceAccountName {
+			morpheusDeployment.Spec.Template.Spec.ServiceAccountName = morpheus.Spec.ServiceAccountName
+			err = r.Update(ctx, morpheusDeployment)
+			if err != nil {
+				log.Error(err, "Failed to update Morpheus Deployment", "Deployment.Namespace", morpheusDeployment.Namespace, "Deployment.Name", morpheusDeployment.Name)
+				return ctrl.Result{}, err
+			}
+			thereWasAnUpdate = true
+		}
 	}
 
-	err = deployTritonServer(r, ctx, morpheus, log)
+	thereWasAnUpdate, err = deployTritonServer(r, ctx, morpheus, log)
 	if err != nil {
 		log.Error(err, "Failed to Deploy Triton Server")
 		return ctrl.Result{}, err
 	}
-	err = deployMilvusDB(r, ctx, morpheus, log)
+	thereWasAnUpdate, err = deployMilvusDB(r, ctx, morpheus, log)
 	if err != nil {
 		log.Error(err, "Failed to Deploy MilvusDB")
 		return ctrl.Result{}, err
 	}
-	return ctrl.Result{}, nil
+	if thereWasAnUpdate {
+		return ctrl.Result{Requeue: true}, nil
+	} else {
+		return ctrl.Result{}, nil
+	}
 }
 
-func deployMilvusDB(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha1.Morpheus, log logr.Logger) error {
+func deployMilvusDB(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha1.Morpheus, log logr.Logger) (bool, error) {
+
 	const milvusEctdPvcName = "milvus-etcd-data"
 	const milvusEctdName = "milvus-etcd"
 	const milvusMinioPvcName = "milvus-minio-data"
@@ -179,36 +200,49 @@ func deployMilvusDB(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1al
 	const milvusPvcDataName = "milvus-data"
 	const minioPort = 9000
 	const etcdPort = 2379
-
-	err := deployMinio(r, ctx, morpheus, log, milvusMinioPvcName, milvusMinioName, minioPort)
+	//etFromSpecElseDefault(morpheus.Spec.Milvus.StoragePvcSize, defaultMilvusPvcSize)
+	thereWasAnUpdate, err := deployMinio(r, ctx, morpheus, log, milvusMinioPvcName, milvusMinioName, minioPort)
 	if err != nil {
 		log.Error(err, "Failed to get deploy minio object storage store")
-		return err
+		return thereWasAnUpdate, err
 	}
-	err = deployEtcd(r, ctx, morpheus, log, milvusEctdPvcName, milvusEctdName, 2379)
+	thereWasAnUpdate, err = deployEtcd(r, ctx, morpheus, log, milvusEctdPvcName, milvusEctdName, etcdPort)
 	if err != nil {
 		log.Error(err, "Failed to get deploy etcd key-value store")
-		return err
+		return thereWasAnUpdate, err
 	}
 	//Deploy Milvus Vector DB
 	milvusPvc := &corev1.PersistentVolumeClaim{}
 	err = r.Get(ctx, types.NamespacedName{Name: milvusPvcDataName, Namespace: morpheus.Namespace}, milvusPvc)
 
+	const defaultMilvusPvcSize = "2Gi"
+	milvusPvcSize := getFromSpecElseDefault(morpheus.Spec.Milvus.StoragePvcSize, defaultMilvusPvcSize)
 	if err != nil && errors.IsNotFound(err) {
 		// Define a new PVC
 		var pvcMilvus *corev1.PersistentVolumeClaim
-		pvcMilvus = r.createPvc(morpheus, milvusPvcDataName, "2Gi")
+		pvcMilvus = r.createPvc(morpheus, milvusPvcDataName, milvusPvcSize)
 		log.Info("Creating a new Pvc for Milvus Data", "Pvc.Namespace", pvcMilvus.Namespace, "Pvc.Name", pvcMilvus.Name)
 		err = r.Create(ctx, pvcMilvus)
 		if err != nil {
 			log.Error(err, "Failed to create Pvc for Milvus", "Pvc.Namespace", pvcMilvus.Namespace, "Pvc.Name", pvcMilvus.Name)
-			return err
+			return thereWasAnUpdate, err
 		}
 	} else if err != nil {
 		log.Error(err, "Failed to get milvus data PVC ")
-		return err
+		return thereWasAnUpdate, err
+	} else {
+		// pvc storage size was changed.
+		if milvusPvcSize != milvusPvc.Spec.Resources.Requests.Storage().String() {
+			milvusPvc.Spec.Resources.Requests["storage"] = resource.MustParse(milvusPvcSize)
+			err = r.Update(ctx, milvusPvc)
+			if err != nil {
+				log.Error(err, "Failed to update Milvus Pvc", "Deployment.Namespace", milvusPvc.Namespace, "Deployment.Name", milvusPvc.Name)
+				return thereWasAnUpdate, err
+			}
+			thereWasAnUpdate = true
+		}
 	}
-	// Create an Etcd Deployment
+	// Create an Milvus DB Deployment
 	milvusDeployment := &appsv1.Deployment{}
 	err = r.Get(ctx, types.NamespacedName{Name: milvusEctdName, Namespace: morpheus.Namespace}, milvusDeployment)
 
@@ -217,16 +251,33 @@ func deployMilvusDB(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1al
 		var deploymentMilvus *appsv1.Deployment
 		minioUrl := fmt.Sprintf("%s:%s", milvusMinioName, minioPort)
 		etcdUrl := fmt.Sprintf("%s:%s", milvusEctdName, etcdPort)
-		deploymentMilvus = r.createMilvusDbDeployment(morpheus, milvusPvcDataName, minioUrl, etcdUrl)
+		deploymentMilvus = r.createMilvusDbDeployment(ctx, morpheus, milvusPvcDataName, minioUrl, etcdUrl)
 		log.Info("Creating a new Deployment", "Deployment.Namespace", deploymentMilvus.Namespace, "Deployment.Name", deploymentMilvus.Name)
 		err = r.Create(ctx, deploymentMilvus)
 		if err != nil {
 			log.Error(err, "Failed to create new milvus-standalone Deployment", "Deployment.Namespace", deploymentMilvus.Namespace, "Deployment.Name", deploymentMilvus.Name)
-			return err
+			return thereWasAnUpdate, err
 		}
 	} else if err != nil {
 		log.Error(err, "Failed to get Milvus Deployment")
-		return err
+		return thereWasAnUpdate, err
+	} else {
+		// Check if deployment data was changed.
+		minioSpecUser := getFromSpecElseDefault(morpheus.Spec.Milvus.Minio.RootUser, ctx.Value("minioDefaultUser").(string))
+		minioSpecPassword := getFromSpecElseDefault(morpheus.Spec.Milvus.Minio.RootPassword, ctx.Value("minioDefaultPassword").(string))
+		for _, env := range milvusDeployment.Spec.Template.Spec.Containers[0].Env {
+			if env.Name == "MINIO_ACCESS_KEY_ID" {
+				if env.Value != minioSpecUser {
+					env.Value = minioSpecUser
+					thereWasAnUpdate = true
+				} else if env.Name == "MINIO_SECRET_ACCESS_KEY" {
+					if env.Value != minioSpecPassword {
+						env.Value = minioSpecPassword
+						thereWasAnUpdate = true
+					}
+				}
+			}
+		}
 	}
 
 	// Create A Milvus Service
@@ -264,35 +315,55 @@ func deployMilvusDB(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1al
 		err = r.Create(ctx, serviceMilvus)
 		if err != nil {
 			log.Error(err, "Failed to create new Milvus Service", "Service.Namespace", serviceMilvus.Namespace, "Service.Name", serviceMilvus.Name)
-			return err
+			return false, err
 		}
 	} else if err != nil {
 		log.Error(err, "Failed to get Milvus Service")
-		return err
+		return false, err
 	}
 
-	return nil
+	return false, nil
 }
 
-func deployEtcd(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha1.Morpheus, log logr.Logger, milvusEctdPvcName string, milvusEctdName string, etcdPort int) error {
+func getFromSpecElseDefault(specValue string, defaultValue string) string {
+	if &specValue != nil && strings.TrimSpace(specValue) != "" {
+		return specValue
+	}
+	return defaultValue
+}
 
+func deployEtcd(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha1.Morpheus, log logr.Logger, milvusEctdPvcName string, milvusEctdName string, etcdPort int) (bool, error) {
+
+	var thereWasAnUpdate bool = false
 	// Create a Persistent volume claim to store etcd data for milvus db.
-	morpheusRepoPvc := &corev1.PersistentVolumeClaim{}
-	err := r.Get(ctx, types.NamespacedName{Name: milvusEctdPvcName, Namespace: morpheus.Namespace}, morpheusRepoPvc)
-
+	etcdPvc := &corev1.PersistentVolumeClaim{}
+	err := r.Get(ctx, types.NamespacedName{Name: milvusEctdPvcName, Namespace: morpheus.Namespace}, etcdPvc)
+	const defaultPvcSizeEtcd = "2Gi"
+	etcdPvcSize := getFromSpecElseDefault(morpheus.Spec.Milvus.Etcd.StoragePvcSize, defaultPvcSizeEtcd)
 	if err != nil && errors.IsNotFound(err) {
 		// Define a new deployment
 		var pvcEtcd *corev1.PersistentVolumeClaim
-		pvcEtcd = r.createPvc(morpheus, milvusEctdPvcName, "2Gi")
+		pvcEtcd = r.createPvc(morpheus, milvusEctdPvcName, etcdPvcSize)
 		log.Info("Creating a new Pvc for Etcd Data", "Pvc.Namespace", pvcEtcd.Namespace, "Pvc.Name", pvcEtcd.Name)
 		err = r.Create(ctx, pvcEtcd)
 		if err != nil {
 			log.Error(err, "Failed to create Pvc for Triton Server", "Pvc.Namespace", pvcEtcd.Namespace, "Pvc.Name", pvcEtcd.Name+"-repo")
-			return err
+			return thereWasAnUpdate, err
 		}
 	} else if err != nil {
 		log.Error(err, "Failed to get milvus etcd data PVC ")
-		return err
+		return false, err
+	} else {
+		// pvc storage size was changed.
+		if etcdPvcSize != etcdPvc.Spec.Resources.Requests.Storage().String() {
+			etcdPvc.Spec.Resources.Requests["storage"] = resource.MustParse(etcdPvcSize)
+			err = r.Update(ctx, etcdPvc)
+			if err != nil {
+				log.Error(err, "Failed to update Etcd Pvc", "Deployment.Namespace", etcdPvc.Namespace, "Deployment.Name", etcdPvc.Name)
+				return thereWasAnUpdate, err
+			}
+			thereWasAnUpdate = true
+		}
 	}
 	// Create an Etcd Deployment
 	etcdDeployment := &appsv1.Deployment{}
@@ -306,11 +377,11 @@ func deployEtcd(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha1
 		err = r.Create(ctx, deploymentEtcd)
 		if err != nil {
 			log.Error(err, "Failed to create new milvus-etcd Deployment", "Deployment.Namespace", deploymentEtcd.Namespace, "Deployment.Name", deploymentEtcd.Name)
-			return err
+			return thereWasAnUpdate, err
 		}
 	} else if err != nil {
 		log.Error(err, "Failed to get Etcd Deployment")
-		return err
+		return thereWasAnUpdate, err
 	}
 
 	// Create an Etcd Service
@@ -334,40 +405,54 @@ func deployEtcd(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha1
 			"component": "etcd",
 		}
 		serviceEtcd = r.createService(morpheus, ports, milvusEctdName, selector)
-		log.Info("Creating a new Triton Service", "Service.Namespace", serviceEtcd.Namespace, "Service.Name", serviceEtcd.Name)
+		log.Info("Creating a new Etcd Service", "Service.Namespace", serviceEtcd.Namespace, "Service.Name", serviceEtcd.Name)
 		err = r.Create(ctx, serviceEtcd)
 		if err != nil {
 			log.Error(err, "Failed to create new Etcd Service", "Service.Namespace", serviceEtcd.Namespace, "Service.Name", serviceEtcd.Name)
-			return err
+			return thereWasAnUpdate, err
 		}
 	} else if err != nil {
 		log.Error(err, "Failed to get Etcd Service")
-		return err
+		return thereWasAnUpdate, err
 	}
 
-	return nil
+	return thereWasAnUpdate, nil
 }
 
-func deployMinio(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha1.Morpheus, log logr.Logger, milvusMinioPvcName string, milvusMinioName string, minioPort int) error {
+func deployMinio(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha1.Morpheus, log logr.Logger, milvusMinioPvcName string, milvusMinioName string, minioPort int) (bool, error) {
 	// Create a Persistent volume claim to store minio data for milvus db.
-
+	var thereWasAnUpdate = false
 	minioPvc := &corev1.PersistentVolumeClaim{}
 	err := r.Get(ctx, types.NamespacedName{Name: milvusMinioPvcName, Namespace: morpheus.Namespace}, minioPvc)
 
+	const defaultMinioPvcSize = "2Gi"
+	minioPvcSize := getFromSpecElseDefault(morpheus.Spec.Milvus.Minio.StoragePvcSize, defaultMinioPvcSize)
 	if err != nil && errors.IsNotFound(err) {
 		// Define a new pvc
 		var pvcMinio *corev1.PersistentVolumeClaim
-		pvcMinio = r.createPvc(morpheus, milvusMinioPvcName, "2Gi")
+		pvcMinio = r.createPvc(morpheus, milvusMinioPvcName, minioPvcSize)
 		log.Info("Creating a new Pvc for Minio Data", "Pvc.Namespace", pvcMinio.Namespace, "Pvc.Name", pvcMinio.Name)
 		err = r.Create(ctx, pvcMinio)
 		if err != nil {
 			log.Error(err, "Failed to create Pvc for Minio Instance", "Pvc.Namespace", pvcMinio.Namespace, "Pvc.Name", pvcMinio.Name)
-			return err
+			return thereWasAnUpdate, err
 		}
 	} else if err != nil {
 		log.Error(err, "Failed to get milvus minio data PVC ")
-		return err
+		return thereWasAnUpdate, err
+	} else {
+		// pvc storage size was changed.
+		if minioPvcSize != minioPvc.Spec.Resources.Requests.Storage().String() {
+			minioPvc.Spec.Resources.Requests["storage"] = resource.MustParse(minioPvcSize)
+			err = r.Update(ctx, minioPvc)
+			if err != nil {
+				log.Error(err, "Failed to update Minio Pvc", "Deployment.Namespace", minioPvc.Namespace, "Deployment.Name", minioPvc.Name)
+				return thereWasAnUpdate, err
+			}
+			thereWasAnUpdate = true
+		}
 	}
+
 	// Create a minio Deployment
 	minioDeployment := &appsv1.Deployment{}
 	err = r.Get(ctx, types.NamespacedName{Name: milvusMinioName, Namespace: morpheus.Namespace}, minioDeployment)
@@ -375,16 +460,33 @@ func deployMinio(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha
 	if err != nil && errors.IsNotFound(err) {
 		// Define a new deployment
 		var deploymentMinio *appsv1.Deployment
-		deploymentMinio = r.createMinioDeployment(morpheus, milvusMinioPvcName, milvusMinioName)
+		deploymentMinio = r.createMinioDeployment(ctx, morpheus, milvusMinioPvcName, milvusMinioName)
 		log.Info("Creating a new Deployment", "Deployment.Namespace", deploymentMinio.Namespace, "Deployment.Name", deploymentMinio.Name)
 		err = r.Create(ctx, deploymentMinio)
 		if err != nil {
 			log.Error(err, "Failed to create new milvus-minio Deployment", "Deployment.Namespace", deploymentMinio.Namespace, "Deployment.Name", deploymentMinio.Name)
-			return err
+			return thereWasAnUpdate, err
 		}
 	} else if err != nil {
 		log.Error(err, "Failed to get Minio Deployment")
-		return err
+		return thereWasAnUpdate, err
+	} else {
+		// Check if deployment data was changed.
+		minioSpecUser := getFromSpecElseDefault(morpheus.Spec.Milvus.Minio.RootUser, ctx.Value("minioDefaultUser").(string))
+		minioSpecPassword := getFromSpecElseDefault(morpheus.Spec.Milvus.Minio.RootPassword, ctx.Value("minioDefaultPassword").(string))
+		for _, env := range minioDeployment.Spec.Template.Spec.Containers[0].Env {
+			if env.Name == "MINIO_ROOT_USER" {
+				if env.Value != minioSpecUser {
+					env.Value = minioSpecUser
+					thereWasAnUpdate = true
+				} else if env.Name == "MINIO_ROOT_PASSWORD" {
+					if env.Value != minioSpecPassword {
+						env.Value = minioSpecPassword
+						thereWasAnUpdate = true
+					}
+				}
+			}
+		}
 	}
 
 	// Create a minio Service
@@ -421,34 +523,50 @@ func deployMinio(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha
 		err = r.Create(ctx, serviceMinio)
 		if err != nil {
 			log.Error(err, "Failed to create new minio Service", "Service.Namespace", serviceMinio.Namespace, "Service.Name", serviceMinio.Name)
-			return err
+			return thereWasAnUpdate, err
 		}
 	} else if err != nil {
-		log.Error(err, "Failed to get Etcd Service")
-		return err
+		log.Error(err, "Failed to get Minio Service")
+		return thereWasAnUpdate, err
 	}
-	return nil
+	return thereWasAnUpdate, nil
 }
 
-func deployTritonServer(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha1.Morpheus, log logr.Logger) error {
+func deployTritonServer(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha1.Morpheus, log logr.Logger) (bool, error) {
 
 	// Create a Persistent volume claim to store morpheus repo content, that will be mounted into triton server' container
+	thereWasAnUpdate := false
 	morpheusRepoPvc := &corev1.PersistentVolumeClaim{}
 	err := r.Get(ctx, types.NamespacedName{Name: morpheus.Name + "-repo", Namespace: morpheus.Namespace}, morpheusRepoPvc)
+
+	const defaultTritonServerMorpheusRepoPvcSize = "20Gi"
+	tritonServerMorpheusRepoPvcSize := getFromSpecElseDefault(morpheus.Spec.TritonServer.MorpheusRepoStorageSize, defaultTritonServerMorpheusRepoPvcSize)
 
 	if err != nil && errors.IsNotFound(err) {
 		// Define a new deployment
 		var pvcMorpheus *corev1.PersistentVolumeClaim
-		pvcMorpheus = r.createPvc(morpheus, "morpheus-repo", "20Gi")
+
+		pvcMorpheus = r.createPvc(morpheus, "morpheus-repo", tritonServerMorpheusRepoPvcSize)
 		log.Info("Creating a new Pvc for Triton Server", "Pvc.Namespace", pvcMorpheus.Namespace, "Pvc.Name", pvcMorpheus.Name)
 		err = r.Create(ctx, pvcMorpheus)
 		if err != nil {
 			log.Error(err, "Failed to create Pvc for Triton Server", "Pvc.Namespace", pvcMorpheus.Namespace, "Pvc.Name", pvcMorpheus.Name+"-repo")
-			return err
+			return thereWasAnUpdate, err
 		}
 	} else if err != nil {
 		log.Error(err, "Failed to get Morpheus repository PVC ")
-		return err
+		return thereWasAnUpdate, err
+	} else {
+		// pvc storage size was changed.
+		if tritonServerMorpheusRepoPvcSize != morpheusRepoPvc.Spec.Resources.Requests.Storage().String() {
+			morpheusRepoPvc.Spec.Resources.Requests["storage"] = resource.MustParse(tritonServerMorpheusRepoPvcSize)
+			err = r.Update(ctx, morpheusRepoPvc)
+			if err != nil {
+				log.Error(err, "Failed to update Triton Server' Morpheus repo Pvc", "Deployment.Namespace", morpheusRepoPvc.Namespace, "Deployment.Name", morpheusRepoPvc.Name)
+				return thereWasAnUpdate, err
+			}
+			thereWasAnUpdate = true
+		}
 	}
 
 	// Create a Triton Inference Server Deployment
@@ -463,11 +581,11 @@ func deployTritonServer(r *MorpheusReconciler, ctx context.Context, morpheus *ai
 		err = r.Create(ctx, deploymentTriton)
 		if err != nil {
 			log.Error(err, "Failed to create new Triton Server Deployment", "Deployment.Namespace", deploymentTriton.Namespace, "Deployment.Name", deploymentTriton.Name)
-			return err
+			return thereWasAnUpdate, err
 		}
 	} else if err != nil {
 		log.Error(err, "Failed to get Triton Server Deployment")
-		return err
+		return thereWasAnUpdate, err
 	}
 
 	// Create a Triton Inference Server Service
@@ -510,14 +628,14 @@ func deployTritonServer(r *MorpheusReconciler, ctx context.Context, morpheus *ai
 		err = r.Create(ctx, serviceTriton)
 		if err != nil {
 			log.Error(err, "Failed to create new Triton Server Service", "Service.Namespace", serviceTriton.Namespace, "Service.Name", serviceTriton.Name)
-			return err
+			return thereWasAnUpdate, err
 		}
 	} else if err != nil {
 		log.Error(err, "Failed to get Triton Server Service")
-		return err
+		return thereWasAnUpdate, err
 	}
 
-	return nil
+	return thereWasAnUpdate, nil
 
 }
 
@@ -681,9 +799,9 @@ func (r *MorpheusReconciler) createTritonDeployment(morpheus *aiv1alpha1.Morpheu
 					InitContainers: []corev1.Container{{
 						Name:  "fetch-models",
 						Image: "nvcr.io/nvidia/tritonserver:23.06",
-						Command: []string{"bash", "-c", "(curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | bash)" +
+						Command: []string{"bash", "-c", "if [ -d /repo/Morpheus ] ; then ((curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | bash)" +
 							" && apt-get install git-lfs && git clone https://github.com/nv-morpheus/Morpheus.git /repo/Morpheus &&" +
-							"cd /repo/Morpheus && ./scripts/fetch_data.py fetch models "},
+							"cd /repo/Morpheus && ./scripts/fetch_data.py fetch models) ; fi "},
 					}},
 				},
 			},
@@ -805,7 +923,7 @@ func (r *MorpheusReconciler) createEtcdDeployment(morpheus *aiv1alpha1.Morpheus,
 	ctrl.SetControllerReference(morpheus, dep, r.Scheme)
 	return dep
 }
-func (r *MorpheusReconciler) createMinioDeployment(morpheus *aiv1alpha1.Morpheus, MilvusPvc string, milvusMinioName string) *appsv1.Deployment {
+func (r *MorpheusReconciler) createMinioDeployment(ctx context.Context, morpheus *aiv1alpha1.Morpheus, MilvusPvc string, milvusMinioName string) *appsv1.Deployment {
 	labels := labelsForComponent("milvus", "v3.5.5", "minio")
 	var numOfReplicas int32 = 1
 
@@ -851,11 +969,11 @@ func (r *MorpheusReconciler) createMinioDeployment(morpheus *aiv1alpha1.Morpheus
 						Env: []corev1.EnvVar{
 							{
 								Name:  "MINIO_ROOT_USER",
-								Value: "admin",
+								Value: getFromSpecElseDefault(morpheus.Spec.Milvus.Minio.RootUser, ctx.Value("minioDefaultUser").(string)),
 							},
 							{
 								Name:  "MINIO_ROOT_PASSWORD",
-								Value: "admin123!",
+								Value: getFromSpecElseDefault(morpheus.Spec.Milvus.Minio.RootPassword, ctx.Value("minioDefaultPassword").(string)),
 							},
 						},
 						VolumeMounts: []corev1.VolumeMount{{
@@ -894,7 +1012,7 @@ func (r *MorpheusReconciler) createMinioDeployment(morpheus *aiv1alpha1.Morpheus
 	ctrl.SetControllerReference(morpheus, dep, r.Scheme)
 	return dep
 }
-func (r *MorpheusReconciler) createMilvusDbDeployment(morpheus *aiv1alpha1.Morpheus, MilvusPvc string, minioServiceUrl string, etcdServiceUrl string) *appsv1.Deployment {
+func (r *MorpheusReconciler) createMilvusDbDeployment(ctx context.Context, morpheus *aiv1alpha1.Morpheus, MilvusPvc string, minioServiceUrl string, etcdServiceUrl string) *appsv1.Deployment {
 	labels := labelsForComponent("milvus", "v2.4.1", "milvus")
 	var numOfReplicas int32 = 1
 
@@ -950,11 +1068,11 @@ func (r *MorpheusReconciler) createMilvusDbDeployment(morpheus *aiv1alpha1.Morph
 
 							{
 								Name:  "MINIO_ACCESS_KEY_ID",
-								Value: "admin",
+								Value: getFromSpecElseDefault(morpheus.Spec.Milvus.Minio.RootUser, ctx.Value("minioDefaultUser").(string)),
 							},
 							{
-								Name:  "MINIO_SECRET_ACCESS_KEYad",
-								Value: "admin123!",
+								Name:  "MINIO_SECRET_ACCESS_KEY",
+								Value: getFromSpecElseDefault(morpheus.Spec.Milvus.Minio.RootPassword, ctx.Value("minioDefaultUser").(string)),
 							},
 						},
 						VolumeMounts: []corev1.VolumeMount{{
@@ -988,7 +1106,6 @@ func (r *MorpheusReconciler) createMilvusDbDeployment(morpheus *aiv1alpha1.Morph
 			},
 		},
 	}
-
 	// Set Morpheus instance as the owner and controller
 	ctrl.SetControllerReference(morpheus, dep, r.Scheme)
 	return dep
