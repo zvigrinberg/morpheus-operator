@@ -24,9 +24,9 @@ import (
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
 type MinioSpec struct {
-	RootUser       string `json:"rootUser"`
-	RootPassword   string `json:"rootPassword"`
-	StoragePvcSize string `json:"storagePvcSize"`
+	RootUser       string `json:"rootUser,omitempty"`
+	RootPassword   string `json:"rootPassword,omitempty"`
+	StoragePvcSize string `json:"storagePvcSize,omitempty"`
 }
 
 type EtcdSpec struct {
@@ -49,10 +49,10 @@ type MorpheusSpec struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// Service account of running all deployments of Morpheus. Edit morpheus_types.go to remove/update
-	ServiceAccountName string     `json:"ServiceAccountName,omitempty"`
+	ServiceAccountName string     `json:"serviceAccountName,omitempty"`
 	AutoBindSccToSa    bool       `json:"autoBindSccToSa,omitempty"`
 	Milvus             MilvusSpec `json:"milvus,omitempty"`
-	TritonServer       TritonSpec `json:"tritonServer"`
+	TritonServer       TritonSpec `json:"tritonServer,omitempty"`
 }
 
 // MorpheusStatus defines the observed state of Morpheus

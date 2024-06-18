@@ -25,6 +25,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"strings"
 
 	aiv1alpha1 "github.com/zvigrinberg/morpheus-operator/api/v1alpha1"
@@ -39,7 +40,6 @@ import (
 // MorpheusReconciler reconciles a Morpheus object
 type MorpheusReconciler struct {
 	client.Client
-	Log    logr.Logger
 	Scheme *runtime.Scheme
 }
 
@@ -66,9 +66,10 @@ func (r *MorpheusReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	ctx = context.Background()
 	const minioAdminDefaultUser = "admin"
 	const minioAdminDefaultPassword = "admin123!"
-	context.WithValue(ctx, "minioDefaultUser", minioAdminDefaultUser)
-	context.WithValue(ctx, "minioDefaultPassword", minioAdminDefaultPassword)
-	log := r.Log.WithValues("morpheus", req.NamespacedName)
+
+	ctx = context.WithValue(ctx, "minioDefaultUser", minioAdminDefaultUser)
+	ctx = context.WithValue(ctx, "minioDefaultPassword", minioAdminDefaultPassword)
+	log := log.FromContext(ctx)
 	// Fetch the Memcached instance
 	morpheus := &aiv1alpha1.Morpheus{}
 	err := r.Get(ctx, req.NamespacedName, morpheus)
@@ -135,7 +136,7 @@ func (r *MorpheusReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			// Define a new RoleBinding to authorize service account to run deployments as any userid.
 			var roleBindingMorpheus *rbacv1.RoleBinding
 			roleBindingMorpheus = r.createAnyUidRoleBinding(morpheus)
-			log.Info("Creating a new Role", "RoleBinding.Namespace", roleBindingMorpheus.Namespace, "RoleBinding.Name", roleBindingMorpheus.Name)
+			log.Info("Creating a new Role Binding", "RoleBinding.Namespace", roleBindingMorpheus.Namespace, "RoleBinding.Name", roleBindingMorpheus.Name)
 			err = r.Create(ctx, roleBindingMorpheus)
 			if err != nil {
 				log.Error(err, "Failed to create new anyuid RoleBinding", "RoleBinding.Namespace", roleBindingMorpheus.Namespace, "RoleBinding.Name", roleBindingMorpheus.Name)
@@ -249,8 +250,8 @@ func deployMilvusDB(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1al
 	if err != nil && errors.IsNotFound(err) {
 		// Define a new deployment
 		var deploymentMilvus *appsv1.Deployment
-		minioUrl := fmt.Sprintf("%s:%s", milvusMinioName, minioPort)
-		etcdUrl := fmt.Sprintf("%s:%s", milvusEctdName, etcdPort)
+		minioUrl := fmt.Sprintf("%s:%d", milvusMinioName, minioPort)
+		etcdUrl := fmt.Sprintf("%s:%d", milvusEctdName, etcdPort)
 		deploymentMilvus = r.createMilvusDbDeployment(ctx, morpheus, milvusPvcDataName, minioUrl, etcdUrl)
 		log.Info("Creating a new Deployment", "Deployment.Namespace", deploymentMilvus.Namespace, "Deployment.Name", deploymentMilvus.Name)
 		err = r.Create(ctx, deploymentMilvus)
@@ -294,7 +295,8 @@ func deployMilvusDB(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1al
 				Protocol: corev1.ProtocolTCP,
 				Port:     19530,
 				TargetPort: intstr.IntOrString{
-					StrVal: "19530",
+					Type:   intstr.Int,
+					IntVal: 19530,
 				},
 			},
 			{
@@ -302,7 +304,8 @@ func deployMilvusDB(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1al
 				Protocol: corev1.ProtocolTCP,
 				Port:     9091,
 				TargetPort: intstr.IntOrString{
-					StrVal: "9091",
+					Type:   intstr.Int,
+					IntVal: 9091,
 				},
 			},
 		}
@@ -341,13 +344,13 @@ func deployEtcd(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha1
 	const defaultPvcSizeEtcd = "2Gi"
 	etcdPvcSize := getFromSpecElseDefault(morpheus.Spec.Milvus.Etcd.StoragePvcSize, defaultPvcSizeEtcd)
 	if err != nil && errors.IsNotFound(err) {
-		// Define a new deployment
+		// Define a new Pvc
 		var pvcEtcd *corev1.PersistentVolumeClaim
 		pvcEtcd = r.createPvc(morpheus, milvusEctdPvcName, etcdPvcSize)
 		log.Info("Creating a new Pvc for Etcd Data", "Pvc.Namespace", pvcEtcd.Namespace, "Pvc.Name", pvcEtcd.Name)
 		err = r.Create(ctx, pvcEtcd)
 		if err != nil {
-			log.Error(err, "Failed to create Pvc for Triton Server", "Pvc.Namespace", pvcEtcd.Namespace, "Pvc.Name", pvcEtcd.Name+"-repo")
+			log.Error(err, "Failed to create Pvc for Etcd", "Pvc.Namespace", pvcEtcd.Namespace, "Pvc.Name", pvcEtcd.Name)
 			return thereWasAnUpdate, err
 		}
 	} else if err != nil {
@@ -396,7 +399,8 @@ func deployEtcd(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha1
 			Protocol: corev1.ProtocolTCP,
 			Port:     int32(etcdPort),
 			TargetPort: intstr.IntOrString{
-				StrVal: string(etcdPort),
+				Type:   intstr.Int,
+				IntVal: int32(etcdPort),
 			},
 		},
 		}
@@ -502,7 +506,8 @@ func deployMinio(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha
 				Protocol: corev1.ProtocolTCP,
 				Port:     int32(minioPort),
 				TargetPort: intstr.IntOrString{
-					StrVal: string(minioPort),
+					Type:   intstr.Int,
+					IntVal: int32(minioPort),
 				},
 			},
 			{
@@ -510,7 +515,8 @@ func deployMinio(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha
 				Protocol: corev1.ProtocolTCP,
 				Port:     9001,
 				TargetPort: intstr.IntOrString{
-					StrVal: "9001",
+					Type:   intstr.Int,
+					IntVal: 9001,
 				},
 			},
 		}
@@ -537,7 +543,7 @@ func deployTritonServer(r *MorpheusReconciler, ctx context.Context, morpheus *ai
 	// Create a Persistent volume claim to store morpheus repo content, that will be mounted into triton server' container
 	thereWasAnUpdate := false
 	morpheusRepoPvc := &corev1.PersistentVolumeClaim{}
-	err := r.Get(ctx, types.NamespacedName{Name: morpheus.Name + "-repo", Namespace: morpheus.Namespace}, morpheusRepoPvc)
+	err := r.Get(ctx, types.NamespacedName{Name: "morpheus-repo", Namespace: morpheus.Namespace}, morpheusRepoPvc)
 
 	const defaultTritonServerMorpheusRepoPvcSize = "20Gi"
 	tritonServerMorpheusRepoPvcSize := getFromSpecElseDefault(morpheus.Spec.TritonServer.MorpheusRepoStorageSize, defaultTritonServerMorpheusRepoPvcSize)
@@ -550,7 +556,7 @@ func deployTritonServer(r *MorpheusReconciler, ctx context.Context, morpheus *ai
 		log.Info("Creating a new Pvc for Triton Server", "Pvc.Namespace", pvcMorpheus.Namespace, "Pvc.Name", pvcMorpheus.Name)
 		err = r.Create(ctx, pvcMorpheus)
 		if err != nil {
-			log.Error(err, "Failed to create Pvc for Triton Server", "Pvc.Namespace", pvcMorpheus.Namespace, "Pvc.Name", pvcMorpheus.Name+"-repo")
+			log.Error(err, "Failed to create Pvc for Triton Server", "Pvc.Namespace", pvcMorpheus.Namespace, "Pvc.Name", pvcMorpheus.Name)
 			return thereWasAnUpdate, err
 		}
 	} else if err != nil {
@@ -600,7 +606,8 @@ func deployTritonServer(r *MorpheusReconciler, ctx context.Context, morpheus *ai
 			Protocol: corev1.ProtocolTCP,
 			Port:     8001,
 			TargetPort: intstr.IntOrString{
-				StrVal: "8001",
+				Type:   intstr.Int,
+				IntVal: 8001,
 			},
 		},
 			{
@@ -608,7 +615,8 @@ func deployTritonServer(r *MorpheusReconciler, ctx context.Context, morpheus *ai
 				Protocol: corev1.ProtocolTCP,
 				Port:     8000,
 				TargetPort: intstr.IntOrString{
-					StrVal: "8000",
+					Type:   intstr.Int,
+					IntVal: 8000,
 				},
 			},
 			{
@@ -616,7 +624,8 @@ func deployTritonServer(r *MorpheusReconciler, ctx context.Context, morpheus *ai
 				Protocol: corev1.ProtocolTCP,
 				Port:     8002,
 				TargetPort: intstr.IntOrString{
-					StrVal: "8002",
+					Type:   intstr.Int,
+					IntVal: 8002,
 				},
 			},
 		}
@@ -669,6 +678,9 @@ func (r *MorpheusReconciler) createMorpheusDeployment(m *aiv1alpha1.Morpheus) *a
 						},
 					}},
 					ServiceAccountName: m.Spec.ServiceAccountName,
+					SecurityContext: &corev1.PodSecurityContext{
+						RunAsUser: &user,
+					},
 				},
 			},
 		},
@@ -718,9 +730,10 @@ func (r *MorpheusReconciler) createAnyUidRole(morpheus *aiv1alpha1.Morpheus) *rb
 			Namespace: morpheus.Namespace,
 		},
 		Rules: []rbacv1.PolicyRule{{
-			Verbs:     []string{"use"},
-			APIGroups: []string{"security.openshift.io"},
-			Resources: []string{"anyuid"},
+			Verbs:         []string{"use"},
+			APIGroups:     []string{"security.openshift.io"},
+			ResourceNames: []string{"anyuid"},
+			Resources:     []string{"securitycontextconstraints"},
 		},
 		},
 	}
@@ -798,7 +811,7 @@ func (r *MorpheusReconciler) createTritonDeployment(morpheus *aiv1alpha1.Morpheu
 					}},
 					InitContainers: []corev1.Container{{
 						Name:  "fetch-models",
-						Image: "nvcr.io/nvidia/tritonserver:23.06",
+						Image: "nvcr.io/nvidia/tritonserver:23.06-py3",
 						Command: []string{"bash", "-c", "if [ -d /repo/Morpheus ] ; then ((curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | bash)" +
 							" && apt-get install git-lfs && git clone https://github.com/nv-morpheus/Morpheus.git /repo/Morpheus &&" +
 							"cd /repo/Morpheus && ./scripts/fetch_data.py fetch models) ; fi "},

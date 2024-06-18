@@ -8,5 +8,12 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/created-by: morpheus-operator
   name: morpheus-sample
+  namespace: zvika-test
 spec:
-  # TODO(user): Add fields here
+  serviceAccountName: morpheus-sa
+  autoBindSccToSa: true
+  milvus:
+    minio:
+      rootUser: admin
+      rootPassword: admin123#
+

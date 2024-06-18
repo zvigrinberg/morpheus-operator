@@ -35,10 +35,6 @@ spec:
           spec:
             description: MorpheusSpec defines the desired state of Morpheus
             properties:
-              ServiceAccountName:
-                description: Service account of running all deployments of Morpheus.
-                  Edit morpheus_types.go to remove/update
-                type: string
               autoBindSccToSa:
                 type: boolean
               milvus:
@@ -56,21 +52,19 @@ spec:
                         type: string
                       storagePvcSize:
                         type: string
-                    required:
-                    - rootPassword
-                    - rootUser
-                    - storagePvcSize
                     type: object
                   storagePvcSize:
                     type: string
                 type: object
+              serviceAccountName:
+                description: Service account of running all deployments of Morpheus.
+                  Edit morpheus_types.go to remove/update
+                type: string
               tritonServer:
                 properties:
                   morpheusRepoStorageSize:
                     type: string
                 type: object
-            required:
-            - tritonServer
             type: object
           status:
             description: MorpheusStatus defines the observed state of Morpheus
