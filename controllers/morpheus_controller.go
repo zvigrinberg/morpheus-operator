@@ -245,7 +245,8 @@ func deployMilvusDB(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1al
 	}
 	// Create an Milvus DB Deployment
 	milvusDeployment := &appsv1.Deployment{}
-	err = r.Get(ctx, types.NamespacedName{Name: milvusEctdName, Namespace: morpheus.Namespace}, milvusDeployment)
+	const milvusStandaloneDeploymentName = "milvus-standalone"
+	err = r.Get(ctx, types.NamespacedName{Name: milvusStandaloneDeploymentName, Namespace: morpheus.Namespace}, milvusDeployment)
 
 	if err != nil && errors.IsNotFound(err) {
 		// Define a new deployment
@@ -283,7 +284,7 @@ func deployMilvusDB(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1al
 
 	// Create A Milvus Service
 	milvusService := &corev1.Service{}
-	const milvusName = "milvus-standalone"
+	const milvusName = milvusStandaloneDeploymentName
 	err = r.Get(ctx, types.NamespacedName{Name: milvusName, Namespace: morpheus.Namespace}, milvusService)
 
 	if err != nil && errors.IsNotFound(err) {
@@ -543,7 +544,8 @@ func deployTritonServer(r *MorpheusReconciler, ctx context.Context, morpheus *ai
 	// Create a Persistent volume claim to store morpheus repo content, that will be mounted into triton server' container
 	thereWasAnUpdate := false
 	morpheusRepoPvc := &corev1.PersistentVolumeClaim{}
-	err := r.Get(ctx, types.NamespacedName{Name: "morpheus-repo", Namespace: morpheus.Namespace}, morpheusRepoPvc)
+	const morpheusRepoPvcName = "morpheus-repo"
+	err := r.Get(ctx, types.NamespacedName{Name: morpheusRepoPvcName, Namespace: morpheus.Namespace}, morpheusRepoPvc)
 
 	const defaultTritonServerMorpheusRepoPvcSize = "20Gi"
 	tritonServerMorpheusRepoPvcSize := getFromSpecElseDefault(morpheus.Spec.TritonServer.MorpheusRepoStorageSize, defaultTritonServerMorpheusRepoPvcSize)
@@ -551,8 +553,7 @@ func deployTritonServer(r *MorpheusReconciler, ctx context.Context, morpheus *ai
 	if err != nil && errors.IsNotFound(err) {
 		// Define a new deployment
 		var pvcMorpheus *corev1.PersistentVolumeClaim
-
-		pvcMorpheus = r.createPvc(morpheus, "morpheus-repo", tritonServerMorpheusRepoPvcSize)
+		pvcMorpheus = r.createPvc(morpheus, morpheusRepoPvcName, tritonServerMorpheusRepoPvcSize)
 		log.Info("Creating a new Pvc for Triton Server", "Pvc.Namespace", pvcMorpheus.Namespace, "Pvc.Name", pvcMorpheus.Name)
 		err = r.Create(ctx, pvcMorpheus)
 		if err != nil {
@@ -582,7 +583,8 @@ func deployTritonServer(r *MorpheusReconciler, ctx context.Context, morpheus *ai
 	if err != nil && errors.IsNotFound(err) {
 		// Define a new deployment
 		var deploymentTriton *appsv1.Deployment
-		deploymentTriton = r.createTritonDeployment(morpheus)
+
+		deploymentTriton = r.createTritonDeployment(morpheus, morpheusRepoPvcName)
 		log.Info("Creating a new Deployment", "Deployment.Namespace", deploymentTriton.Namespace, "Deployment.Name", deploymentTriton.Name)
 		err = r.Create(ctx, deploymentTriton)
 		if err != nil {
@@ -783,9 +785,10 @@ func (r *MorpheusReconciler) createPvc(morpheus *aiv1alpha1.Morpheus, pvcName st
 	return pvc
 }
 
-func (r *MorpheusReconciler) createTritonDeployment(morpheus *aiv1alpha1.Morpheus) *appsv1.Deployment {
+func (r *MorpheusReconciler) createTritonDeployment(morpheus *aiv1alpha1.Morpheus, morpheusRepoPvcName string) *appsv1.Deployment {
 	labels := labelsForComponent("triton-server", "v23.06", "")
 	var numOfReplicas int32 = 1
+	var rootUserId int64 = 0
 
 	dep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -802,20 +805,42 @@ func (r *MorpheusReconciler) createTritonDeployment(morpheus *aiv1alpha1.Morpheu
 					Labels: labels,
 				},
 				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{{
+						Name:  "fetch-models",
+						Image: "nvcr.io/nvidia/tritonserver:23.06-py3",
+						Command: []string{"bash", "-c", "if [ ! -d /repo/Morpheus ] ; then ((curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | bash)" +
+							" && apt-get install git-lfs && git clone https://github.com/nv-morpheus/Morpheus.git /repo/Morpheus &&" +
+							"cd /repo/Morpheus && ./scripts/fetch_data.py fetch models) ; fi "},
+						VolumeMounts: []corev1.VolumeMount{{
+							Name:      morpheusRepoPvcName,
+							MountPath: "/repo",
+						}},
+						SecurityContext: &corev1.SecurityContext{
+							RunAsUser: &rootUserId,
+						},
+					}},
 					Containers: []corev1.Container{{
 						Image: "nvcr.io/nvidia/tritonserver:23.06-py3",
 						Name:  "triton",
 						Command: []string{"tritonserver", "--model-repository=/repo/Morpheus/models/triton-model-repo",
 							"--exit-on-error=false", "--strict-readiness=false",
 							"--disable-auto-complete-config", "--log-info=true"},
+
+						VolumeMounts: []corev1.VolumeMount{{
+							Name:      morpheusRepoPvcName,
+							MountPath: "/repo",
+						}},
 					}},
-					InitContainers: []corev1.Container{{
-						Name:  "fetch-models",
-						Image: "nvcr.io/nvidia/tritonserver:23.06-py3",
-						Command: []string{"bash", "-c", "if [ -d /repo/Morpheus ] ; then ((curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | bash)" +
-							" && apt-get install git-lfs && git clone https://github.com/nv-morpheus/Morpheus.git /repo/Morpheus &&" +
-							"cd /repo/Morpheus && ./scripts/fetch_data.py fetch models) ; fi "},
-					}},
+					ServiceAccountName: morpheus.Spec.ServiceAccountName,
+					Volumes: []corev1.Volume{{
+						Name: morpheusRepoPvcName,
+						VolumeSource: corev1.VolumeSource{
+							PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+								ClaimName: morpheusRepoPvcName,
+							},
+						},
+					},
+					},
 				},
 			},
 		},
