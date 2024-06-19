@@ -85,6 +85,7 @@ func (r *MorpheusReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		log.Error(err, "Failed to get Memcached")
 		return ctrl.Result{}, err
 	}
+	err = InitializeCrStatusImpl(ctx, morpheus, r)
 	morpheusSA := &corev1.ServiceAccount{}
 	if strings.TrimSpace(morpheus.Spec.ServiceAccountName) == "" {
 		morpheus.Spec.ServiceAccountName = "morpheus-sa"
@@ -111,40 +112,9 @@ func (r *MorpheusReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		morpheus.Spec.AutoBindSccToSa = true
 	}
 	if morpheus.Spec.AutoBindSccToSa {
-		// Checks Whether Morpheus Role exists.
-		morpheusAnyUidRole := &rbacv1.Role{}
-		err = r.Get(ctx, types.NamespacedName{Name: morpheus.Name, Namespace: morpheus.Namespace}, morpheusAnyUidRole)
-		if err != nil && errors.IsNotFound(err) {
-			// Define a new Role
-			var roleMorpheus *rbacv1.Role
-			roleMorpheus = r.createAnyUidRole(morpheus)
-			log.Info("Creating a new Role", "Role.Namespace", roleMorpheus.Namespace, "Role.Name", roleMorpheus.Name)
-			err = r.Create(ctx, roleMorpheus)
-			if err != nil {
-				log.Error(err, "Failed to create new anyuid Role", "Role.Namespace", roleMorpheus.Namespace, "Role.Name", roleMorpheus.Name)
-				return ctrl.Result{}, err
-			}
-		} else if err != nil {
-			log.Error(err, "Failed to get Role")
-			return ctrl.Result{}, err
-		}
-
-		// Checks Whether Morpheus RoleBinding exists.
-		morpheusAnyUidRoleBinding := &rbacv1.RoleBinding{}
-		err = r.Get(ctx, types.NamespacedName{Name: morpheus.Name, Namespace: morpheus.Namespace}, morpheusAnyUidRoleBinding)
-		if err != nil && errors.IsNotFound(err) {
-			// Define a new RoleBinding to authorize service account to run deployments as any userid.
-			var roleBindingMorpheus *rbacv1.RoleBinding
-			roleBindingMorpheus = r.createAnyUidRoleBinding(morpheus)
-			log.Info("Creating a new Role Binding", "RoleBinding.Namespace", roleBindingMorpheus.Namespace, "RoleBinding.Name", roleBindingMorpheus.Name)
-			err = r.Create(ctx, roleBindingMorpheus)
-			if err != nil {
-				log.Error(err, "Failed to create new anyuid RoleBinding", "RoleBinding.Namespace", roleBindingMorpheus.Namespace, "RoleBinding.Name", roleBindingMorpheus.Name)
-				return ctrl.Result{}, err
-			}
-		} else if err != nil {
-			log.Error(err, "Failed to get Role")
-			return ctrl.Result{}, err
+		err2, result := createAnyUidSecurityContextConstraint(ctx, r, morpheus, log)
+		if err2 != nil {
+			return result, err2
 		}
 	}
 	// Checks Whether Morpheus deployment exists.
@@ -157,10 +127,14 @@ func (r *MorpheusReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		err = r.Create(ctx, deploymentMorpheus)
 		if err != nil {
 			log.Error(err, "Failed to create new Morpheus Deployment", "Deployment.Namespace", deploymentMorpheus.Namespace, "Deployment.Name", deploymentMorpheus.Name)
+			UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMorpheus, metav1.ConditionFalse, "Reconciling:Creation:Error", err.Error())
 			return ctrl.Result{}, err
 		}
+		UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMorpheus, metav1.ConditionTrue, "Reconciling:Create", "Morpheus Deployment successfully created and deployed!")
 	} else if err != nil {
-		log.Error(err, "Failed to get Morpheus Deployment")
+		const errorMessage = "Failed to get Morpheus Deployment"
+		log.Error(err, errorMessage)
+		UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMorpheus, metav1.ConditionFalse, "Reconciling:Deployment:Fetch:Error", errorMessage+"->"+err.Error())
 		return ctrl.Result{}, err
 	} else {
 		serviceAccountDeployment := morpheusDeployment.Spec.Template.Spec.ServiceAccountName
@@ -169,9 +143,11 @@ func (r *MorpheusReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			err = r.Update(ctx, morpheusDeployment)
 			if err != nil {
 				log.Error(err, "Failed to update Morpheus Deployment", "Deployment.Namespace", morpheusDeployment.Namespace, "Deployment.Name", morpheusDeployment.Name)
+				UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMorpheus, metav1.ConditionFalse, "Reconciling:Update:Error", err.Error())
 				return ctrl.Result{}, err
 			}
 			thereWasAnUpdate = true
+			UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMorpheus, metav1.ConditionTrue, "Reconciling:Update", "Morpheus Deployment successfully Updated!")
 		}
 	}
 
@@ -190,6 +166,45 @@ func (r *MorpheusReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	} else {
 		return ctrl.Result{}, nil
 	}
+}
+
+func createAnyUidSecurityContextConstraint(ctx context.Context, r *MorpheusReconciler, morpheus *aiv1alpha1.Morpheus, log logr.Logger) (error, ctrl.Result) {
+	// Checks Whether Morpheus Role exists.
+	morpheusAnyUidRole := &rbacv1.Role{}
+	err := r.Get(ctx, types.NamespacedName{Name: morpheus.Name, Namespace: morpheus.Namespace}, morpheusAnyUidRole)
+	if err != nil && errors.IsNotFound(err) {
+		// Define a new Role
+		var roleMorpheus *rbacv1.Role
+		roleMorpheus = r.createAnyUidRole(morpheus)
+		log.Info("Creating a new Role", "Role.Namespace", roleMorpheus.Namespace, "Role.Name", roleMorpheus.Name)
+		err = r.Create(ctx, roleMorpheus)
+		if err != nil {
+			log.Error(err, "Failed to create new anyuid Role", "Role.Namespace", roleMorpheus.Namespace, "Role.Name", roleMorpheus.Name)
+			return nil, ctrl.Result{}
+		}
+	} else if err != nil {
+		log.Error(err, "Failed to get Role")
+		return nil, ctrl.Result{}
+	}
+
+	// Checks Whether Morpheus RoleBinding exists.
+	morpheusAnyUidRoleBinding := &rbacv1.RoleBinding{}
+	err = r.Get(ctx, types.NamespacedName{Name: morpheus.Name, Namespace: morpheus.Namespace}, morpheusAnyUidRoleBinding)
+	if err != nil && errors.IsNotFound(err) {
+		// Define a new RoleBinding to authorize service account to run deployments as any userid.
+		var roleBindingMorpheus *rbacv1.RoleBinding
+		roleBindingMorpheus = r.createAnyUidRoleBinding(morpheus)
+		log.Info("Creating a new Role Binding", "RoleBinding.Namespace", roleBindingMorpheus.Namespace, "RoleBinding.Name", roleBindingMorpheus.Name)
+		err = r.Create(ctx, roleBindingMorpheus)
+		if err != nil {
+			log.Error(err, "Failed to create new anyuid RoleBinding", "RoleBinding.Namespace", roleBindingMorpheus.Namespace, "RoleBinding.Name", roleBindingMorpheus.Name)
+			return err, ctrl.Result{}
+		}
+	} else if err != nil {
+		log.Error(err, "Failed to get Role")
+		return err, ctrl.Result{}
+	}
+	return nil, ctrl.Result{}
 }
 
 func deployMilvusDB(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha1.Morpheus, log logr.Logger) (bool, error) {
@@ -213,6 +228,7 @@ func deployMilvusDB(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1al
 		return thereWasAnUpdate, err
 	}
 	//Deploy Milvus Vector DB
+	resourceCreated := false
 	milvusPvc := &corev1.PersistentVolumeClaim{}
 	err = r.Get(ctx, types.NamespacedName{Name: milvusPvcDataName, Namespace: morpheus.Namespace}, milvusPvc)
 
@@ -225,8 +241,12 @@ func deployMilvusDB(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1al
 		log.Info("Creating a new Pvc for Milvus Data", "Pvc.Namespace", pvcMilvus.Namespace, "Pvc.Name", pvcMilvus.Name)
 		err = r.Create(ctx, pvcMilvus)
 		if err != nil {
-			log.Error(err, "Failed to create Pvc for Milvus", "Pvc.Namespace", pvcMilvus.Namespace, "Pvc.Name", pvcMilvus.Name)
+			const errorMessageBase = "Failed to create Pvc for Milvus"
+			log.Error(err, errorMessageBase, "Pvc.Namespace", pvcMilvus.Namespace, "Pvc.Name", pvcMilvus.Name)
+			UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMilvusDB, metav1.ConditionFalse, "Reconciling:Create:Pvc:Error", errorMessageBase)
 			return thereWasAnUpdate, err
+		} else {
+			resourceCreated = true
 		}
 	} else if err != nil {
 		log.Error(err, "Failed to get milvus data PVC ")
@@ -237,7 +257,9 @@ func deployMilvusDB(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1al
 			milvusPvc.Spec.Resources.Requests["storage"] = resource.MustParse(milvusPvcSize)
 			err = r.Update(ctx, milvusPvc)
 			if err != nil {
-				log.Error(err, "Failed to update Milvus Pvc", "Deployment.Namespace", milvusPvc.Namespace, "Deployment.Name", milvusPvc.Name)
+				const baseMessageError = "Failed to update Milvus Pvc"
+				log.Error(err, baseMessageError, "Deployment.Namespace", milvusPvc.Namespace, "Deployment.Name", milvusPvc.Name)
+				UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMilvusDB, metav1.ConditionFalse, "Reconciling:Update:Pvc:Error", baseMessageError+"->"+err.Error())
 				return thereWasAnUpdate, err
 			}
 			thereWasAnUpdate = true
@@ -257,8 +279,12 @@ func deployMilvusDB(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1al
 		log.Info("Creating a new Deployment", "Deployment.Namespace", deploymentMilvus.Namespace, "Deployment.Name", deploymentMilvus.Name)
 		err = r.Create(ctx, deploymentMilvus)
 		if err != nil {
-			log.Error(err, "Failed to create new milvus-standalone Deployment", "Deployment.Namespace", deploymentMilvus.Namespace, "Deployment.Name", deploymentMilvus.Name)
+			const baseErrorMessage = "Failed to create new milvus-standalone Deployment"
+			log.Error(err, baseErrorMessage, "Deployment.Namespace", deploymentMilvus.Namespace, "Deployment.Name", deploymentMilvus.Name)
+			UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMilvusDB, metav1.ConditionFalse, "Reconciling:Create:Deployment:Error", baseErrorMessage+" ->"+err.Error())
 			return thereWasAnUpdate, err
+		} else {
+			resourceCreated = true
 		}
 	} else if err != nil {
 		log.Error(err, "Failed to get Milvus Deployment")
@@ -267,18 +293,31 @@ func deployMilvusDB(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1al
 		// Check if deployment data was changed.
 		minioSpecUser := getFromSpecElseDefault(morpheus.Spec.Milvus.Minio.RootUser, ctx.Value("minioDefaultUser").(string))
 		minioSpecPassword := getFromSpecElseDefault(morpheus.Spec.Milvus.Minio.RootPassword, ctx.Value("minioDefaultPassword").(string))
+		thereWasEnvironmentUpdate := false
 		for _, env := range milvusDeployment.Spec.Template.Spec.Containers[0].Env {
 			if env.Name == "MINIO_ACCESS_KEY_ID" {
 				if env.Value != minioSpecUser {
 					env.Value = minioSpecUser
+					thereWasEnvironmentUpdate = true
 					thereWasAnUpdate = true
 				} else if env.Name == "MINIO_SECRET_ACCESS_KEY" {
 					if env.Value != minioSpecPassword {
 						env.Value = minioSpecPassword
+						thereWasEnvironmentUpdate = true
 						thereWasAnUpdate = true
 					}
 				}
 			}
+		}
+		if thereWasEnvironmentUpdate {
+			err = r.Update(ctx, milvusDeployment)
+			if err != nil {
+				const baseMessageError = "Failed to update Milvus Deployment"
+				log.Error(err, baseMessageError, "Deployment.Namespace", milvusDeployment.Namespace, "Deployment.Name", milvusDeployment.Name)
+				UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMilvusDB, metav1.ConditionFalse, "Reconciling:Update:Deployment:Error", baseMessageError+"->"+err.Error())
+				return thereWasAnUpdate, err
+			}
+			thereWasAnUpdate = true
 		}
 	}
 
@@ -320,13 +359,17 @@ func deployMilvusDB(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1al
 		if err != nil {
 			log.Error(err, "Failed to create new Milvus Service", "Service.Namespace", serviceMilvus.Namespace, "Service.Name", serviceMilvus.Name)
 			return false, err
+		} else {
+			resourceCreated = true
 		}
 	} else if err != nil {
 		log.Error(err, "Failed to get Milvus Service")
 		return false, err
 	}
-
-	return false, nil
+	if resourceCreated {
+		UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMilvusDB, metav1.ConditionTrue, "Reconciling:Create", "MilvusDB Instance successfully Deployed!")
+	}
+	return thereWasAnUpdate, nil
 }
 
 func getFromSpecElseDefault(specValue string, defaultValue string) string {
@@ -339,6 +382,7 @@ func getFromSpecElseDefault(specValue string, defaultValue string) string {
 func deployEtcd(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha1.Morpheus, log logr.Logger, milvusEctdPvcName string, milvusEctdName string, etcdPort int) (bool, error) {
 
 	var thereWasAnUpdate bool = false
+	resourceCreated := false
 	// Create a Persistent volume claim to store etcd data for milvus db.
 	etcdPvc := &corev1.PersistentVolumeClaim{}
 	err := r.Get(ctx, types.NamespacedName{Name: milvusEctdPvcName, Namespace: morpheus.Namespace}, etcdPvc)
@@ -351,8 +395,12 @@ func deployEtcd(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha1
 		log.Info("Creating a new Pvc for Etcd Data", "Pvc.Namespace", pvcEtcd.Namespace, "Pvc.Name", pvcEtcd.Name)
 		err = r.Create(ctx, pvcEtcd)
 		if err != nil {
-			log.Error(err, "Failed to create Pvc for Etcd", "Pvc.Namespace", pvcEtcd.Namespace, "Pvc.Name", pvcEtcd.Name)
+			const errorMessageBase = "Failed to create Pvc for Etcd"
+			log.Error(err, errorMessageBase, "Pvc.Namespace", pvcEtcd.Namespace, "Pvc.Name", pvcEtcd.Name)
+			UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedEtcd, metav1.ConditionFalse, "Reconciling:Create:Pvc:Error", errorMessageBase)
 			return thereWasAnUpdate, err
+		} else {
+			resourceCreated = true
 		}
 	} else if err != nil {
 		log.Error(err, "Failed to get milvus etcd data PVC ")
@@ -363,7 +411,9 @@ func deployEtcd(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha1
 			etcdPvc.Spec.Resources.Requests["storage"] = resource.MustParse(etcdPvcSize)
 			err = r.Update(ctx, etcdPvc)
 			if err != nil {
-				log.Error(err, "Failed to update Etcd Pvc", "Deployment.Namespace", etcdPvc.Namespace, "Deployment.Name", etcdPvc.Name)
+				const baseMessageError = "Failed to update Etcd Pvc"
+				log.Error(err, baseMessageError, "Deployment.Namespace", etcdPvc.Namespace, "Deployment.Name", etcdPvc.Name)
+				UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedEtcd, metav1.ConditionFalse, "Reconciling:Update:Pvc:Error", baseMessageError+"->"+err.Error())
 				return thereWasAnUpdate, err
 			}
 			thereWasAnUpdate = true
@@ -380,8 +430,12 @@ func deployEtcd(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha1
 		log.Info("Creating a new Deployment", "Deployment.Namespace", deploymentEtcd.Namespace, "Deployment.Name", deploymentEtcd.Name)
 		err = r.Create(ctx, deploymentEtcd)
 		if err != nil {
-			log.Error(err, "Failed to create new milvus-etcd Deployment", "Deployment.Namespace", deploymentEtcd.Namespace, "Deployment.Name", deploymentEtcd.Name)
+			const baseErrorMessage = "Failed to create new milvus-etcd Deployment"
+			log.Error(err, baseErrorMessage, "Deployment.Namespace", deploymentEtcd.Namespace, "Deployment.Name", deploymentEtcd.Name)
+			UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedEtcd, metav1.ConditionFalse, "Reconciling:Create:Deployment:Error", baseErrorMessage+" ->"+err.Error())
 			return thereWasAnUpdate, err
+		} else {
+			resourceCreated = true
 		}
 	} else if err != nil {
 		log.Error(err, "Failed to get Etcd Deployment")
@@ -411,22 +465,31 @@ func deployEtcd(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha1
 		}
 		serviceEtcd = r.createService(morpheus, ports, milvusEctdName, selector)
 		log.Info("Creating a new Etcd Service", "Service.Namespace", serviceEtcd.Namespace, "Service.Name", serviceEtcd.Name)
+
 		err = r.Create(ctx, serviceEtcd)
 		if err != nil {
-			log.Error(err, "Failed to create new Etcd Service", "Service.Namespace", serviceEtcd.Namespace, "Service.Name", serviceEtcd.Name)
+			const baseErrorMessage = "Failed to create new Etcd Service"
+			log.Error(err, baseErrorMessage, "Service.Namespace", serviceEtcd.Namespace, "Service.Name", serviceEtcd.Name)
+			UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedEtcd, metav1.ConditionFalse, "Reconciling:Create:Service:Error", baseErrorMessage+" ->"+err.Error())
 			return thereWasAnUpdate, err
+		} else {
+			resourceCreated = true
 		}
 	} else if err != nil {
 		log.Error(err, "Failed to get Etcd Service")
 		return thereWasAnUpdate, err
 	}
 
+	if resourceCreated {
+		UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedEtcd, metav1.ConditionTrue, "Reconciling:Create", "Etcd Instance successfully Deployed!")
+	}
 	return thereWasAnUpdate, nil
 }
 
 func deployMinio(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha1.Morpheus, log logr.Logger, milvusMinioPvcName string, milvusMinioName string, minioPort int) (bool, error) {
 	// Create a Persistent volume claim to store minio data for milvus db.
 	var thereWasAnUpdate = false
+	resourceCreated := false
 	minioPvc := &corev1.PersistentVolumeClaim{}
 	err := r.Get(ctx, types.NamespacedName{Name: milvusMinioPvcName, Namespace: morpheus.Namespace}, minioPvc)
 
@@ -441,6 +504,8 @@ func deployMinio(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha
 		if err != nil {
 			log.Error(err, "Failed to create Pvc for Minio Instance", "Pvc.Namespace", pvcMinio.Namespace, "Pvc.Name", pvcMinio.Name)
 			return thereWasAnUpdate, err
+		} else {
+			resourceCreated = true
 		}
 	} else if err != nil {
 		log.Error(err, "Failed to get milvus minio data PVC ")
@@ -469,28 +534,45 @@ func deployMinio(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha
 		log.Info("Creating a new Deployment", "Deployment.Namespace", deploymentMinio.Namespace, "Deployment.Name", deploymentMinio.Name)
 		err = r.Create(ctx, deploymentMinio)
 		if err != nil {
-			log.Error(err, "Failed to create new milvus-minio Deployment", "Deployment.Namespace", deploymentMinio.Namespace, "Deployment.Name", deploymentMinio.Name)
+			const baseErrorMessage = "Failed to create new milvus-minio Deployment"
+			log.Error(err, baseErrorMessage, "Deployment.Namespace", deploymentMinio.Namespace, "Deployment.Name", deploymentMinio.Name)
+			UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMinio, metav1.ConditionFalse, "Reconciling:Create:Deployment:Error", baseErrorMessage+" ->"+err.Error())
 			return thereWasAnUpdate, err
+		} else {
+			resourceCreated = true
 		}
 	} else if err != nil {
-		log.Error(err, "Failed to get Minio Deployment")
+		const errorMessage = "Failed to get Minio Deployment"
+		log.Error(err, errorMessage)
+		UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMinio, metav1.ConditionFalse, "Reconciling:Fetch:Deployment:Error", errorMessage+"->"+err.Error())
 		return thereWasAnUpdate, err
 	} else {
 		// Check if deployment data was changed.
 		minioSpecUser := getFromSpecElseDefault(morpheus.Spec.Milvus.Minio.RootUser, ctx.Value("minioDefaultUser").(string))
 		minioSpecPassword := getFromSpecElseDefault(morpheus.Spec.Milvus.Minio.RootPassword, ctx.Value("minioDefaultPassword").(string))
+		thereWasEnvironmentUpdate := false
 		for _, env := range minioDeployment.Spec.Template.Spec.Containers[0].Env {
 			if env.Name == "MINIO_ROOT_USER" {
 				if env.Value != minioSpecUser {
 					env.Value = minioSpecUser
-					thereWasAnUpdate = true
-				} else if env.Name == "MINIO_ROOT_PASSWORD" {
-					if env.Value != minioSpecPassword {
-						env.Value = minioSpecPassword
-						thereWasAnUpdate = true
-					}
+					thereWasEnvironmentUpdate = true
+				}
+			} else if env.Name == "MINIO_ROOT_PASSWORD" {
+				if env.Value != minioSpecPassword {
+					env.Value = minioSpecPassword
+					thereWasEnvironmentUpdate = true
 				}
 			}
+		}
+		if thereWasEnvironmentUpdate {
+			err = r.Update(ctx, minioDeployment)
+			if err != nil {
+				const baseMessageError = "Failed to update Minio Deployment"
+				log.Error(err, baseMessageError, "Deployment.Namespace", minioDeployment.Namespace, "Deployment.Name", minioDeployment.Name)
+				UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMinio, metav1.ConditionFalse, "Reconciling:Update:Deployment:Error", baseMessageError+"->"+err.Error())
+				return thereWasAnUpdate, err
+			}
+			thereWasAnUpdate = true
 		}
 	}
 
@@ -529,12 +611,22 @@ func deployMinio(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha
 		log.Info("Creating a new minio Service", "Service.Namespace", serviceMinio.Namespace, "Service.Name", serviceMinio.Name)
 		err = r.Create(ctx, serviceMinio)
 		if err != nil {
-			log.Error(err, "Failed to create new minio Service", "Service.Namespace", serviceMinio.Namespace, "Service.Name", serviceMinio.Name)
+			const baseErrorMessage = "Failed to create new minio Service"
+			log.Error(err, baseErrorMessage, "Service.Namespace", serviceMinio.Namespace, "Service.Name", serviceMinio.Name)
+			UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMinio, metav1.ConditionFalse, "Reconciling:Create:Service:Error", baseErrorMessage+" ->"+err.Error())
 			return thereWasAnUpdate, err
 		}
 	} else if err != nil {
-		log.Error(err, "Failed to get Minio Service")
+		const errorMessage = "Failed to get Minio Service"
+		log.Error(err, errorMessage)
+		UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMinio, metav1.ConditionFalse, "Reconciling:Fetch:Service:Error", errorMessage+" ->"+err.Error())
 		return thereWasAnUpdate, err
+	} else {
+		resourceCreated = true
+	}
+	if resourceCreated {
+		UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMinio, metav1.ConditionTrue, "Reconciling:Create", "Minio Instance successfully Deployed!")
+		UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMinio, metav1.ConditionTrue, "Reconciling:Create", "Minio Instance successfully Deployed!")
 	}
 	return thereWasAnUpdate, nil
 }
@@ -543,6 +635,7 @@ func deployTritonServer(r *MorpheusReconciler, ctx context.Context, morpheus *ai
 
 	// Create a Persistent volume claim to store morpheus repo content, that will be mounted into triton server' container
 	thereWasAnUpdate := false
+	resourceCreated := false
 	morpheusRepoPvc := &corev1.PersistentVolumeClaim{}
 	const morpheusRepoPvcName = "morpheus-repo"
 	err := r.Get(ctx, types.NamespacedName{Name: morpheusRepoPvcName, Namespace: morpheus.Namespace}, morpheusRepoPvc)
@@ -557,7 +650,9 @@ func deployTritonServer(r *MorpheusReconciler, ctx context.Context, morpheus *ai
 		log.Info("Creating a new Pvc for Triton Server", "Pvc.Namespace", pvcMorpheus.Namespace, "Pvc.Name", pvcMorpheus.Name)
 		err = r.Create(ctx, pvcMorpheus)
 		if err != nil {
-			log.Error(err, "Failed to create Pvc for Triton Server", "Pvc.Namespace", pvcMorpheus.Namespace, "Pvc.Name", pvcMorpheus.Name)
+			const errorMessageBase = "Failed to create Pvc for Triton Server"
+			log.Error(err, errorMessageBase, "Pvc.Namespace", pvcMorpheus.Namespace, "Pvc.Name", pvcMorpheus.Name)
+			UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedTritonServer, metav1.ConditionFalse, "Reconciling:Create:Pvc:Error", errorMessageBase)
 			return thereWasAnUpdate, err
 		}
 	} else if err != nil {
@@ -569,10 +664,14 @@ func deployTritonServer(r *MorpheusReconciler, ctx context.Context, morpheus *ai
 			morpheusRepoPvc.Spec.Resources.Requests["storage"] = resource.MustParse(tritonServerMorpheusRepoPvcSize)
 			err = r.Update(ctx, morpheusRepoPvc)
 			if err != nil {
-				log.Error(err, "Failed to update Triton Server' Morpheus repo Pvc", "Deployment.Namespace", morpheusRepoPvc.Namespace, "Deployment.Name", morpheusRepoPvc.Name)
+				const baseMessageError = "Failed to update Triton Server' Morpheus repo Pvc"
+				log.Error(err, baseMessageError, "Deployment.Namespace", morpheusRepoPvc.Namespace, "Deployment.Name", morpheusRepoPvc.Name)
+				UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedTritonServer, metav1.ConditionFalse, "Reconciling:Update:Pvc:Error", baseMessageError+"->"+err.Error())
 				return thereWasAnUpdate, err
 			}
 			thereWasAnUpdate = true
+		} else {
+			resourceCreated = true
 		}
 	}
 
@@ -588,12 +687,18 @@ func deployTritonServer(r *MorpheusReconciler, ctx context.Context, morpheus *ai
 		log.Info("Creating a new Deployment", "Deployment.Namespace", deploymentTriton.Namespace, "Deployment.Name", deploymentTriton.Name)
 		err = r.Create(ctx, deploymentTriton)
 		if err != nil {
-			log.Error(err, "Failed to create new Triton Server Deployment", "Deployment.Namespace", deploymentTriton.Namespace, "Deployment.Name", deploymentTriton.Name)
+			const baseErrorMessage = "Failed to create new Triton Server Deployment"
+			log.Error(err, baseErrorMessage, "Deployment.Namespace", deploymentTriton.Namespace, "Deployment.Name", deploymentTriton.Name)
+			UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedTritonServer, metav1.ConditionFalse, "Reconciling:Create:Deployment:Error", baseErrorMessage+" ->"+err.Error())
 			return thereWasAnUpdate, err
 		}
 	} else if err != nil {
-		log.Error(err, "Failed to get Triton Server Deployment")
+		const errorMessage = "Failed to get Triton Server Deployment"
+		log.Error(err, errorMessage)
+		UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedTritonServer, metav1.ConditionFalse, "Reconciling:Fetch:Deployment:Error", errorMessage+"->"+err.Error())
 		return thereWasAnUpdate, err
+	} else {
+		resourceCreated = true
 	}
 
 	// Create a Triton Inference Server Service
@@ -636,16 +741,25 @@ func deployTritonServer(r *MorpheusReconciler, ctx context.Context, morpheus *ai
 		}
 		serviceTriton = r.createService(morpheus, ports, selector["app"], selector)
 		log.Info("Creating a new Triton Service", "Service.Namespace", serviceTriton.Namespace, "Service.Name", serviceTriton.Name)
+
 		err = r.Create(ctx, serviceTriton)
 		if err != nil {
-			log.Error(err, "Failed to create new Triton Server Service", "Service.Namespace", serviceTriton.Namespace, "Service.Name", serviceTriton.Name)
+			const baseErrorMessage = "Failed to create new Triton Server Service"
+			log.Error(err, baseErrorMessage, "Service.Namespace", serviceTriton.Namespace, "Service.Name", serviceTriton.Name)
+			UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedTritonServer, metav1.ConditionFalse, "Reconciling:Create:Service:Error", baseErrorMessage+" ->"+err.Error())
 			return thereWasAnUpdate, err
 		}
 	} else if err != nil {
-		log.Error(err, "Failed to get Triton Server Service")
+		const errorMessage = "Failed to get Triton Server Service"
+		log.Error(err, errorMessage)
+		UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedTritonServer, metav1.ConditionFalse, "Reconciling:Fetch:Service:Error", errorMessage+" ->"+err.Error())
 		return thereWasAnUpdate, err
+	} else {
+		resourceCreated = true
 	}
-
+	if resourceCreated {
+		UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedTritonServer, metav1.ConditionTrue, "Reconciling:Create", "Triton Server successfully Deployed!")
+	}
 	return thereWasAnUpdate, nil
 
 }

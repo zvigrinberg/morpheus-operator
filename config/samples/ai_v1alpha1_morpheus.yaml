@@ -7,6 +7,7 @@ metadata:
     app.kubernetes.io/part-of: morpheus-operator
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/created-by: morpheus-operator
+    hello: there2
   name: morpheus-sample
   namespace: zvika-test
 spec:
