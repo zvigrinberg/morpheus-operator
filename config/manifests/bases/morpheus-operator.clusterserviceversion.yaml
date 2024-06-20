@@ -1,0 +1,52 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: ClusterServiceVersion
+metadata:
+  annotations:
+    alm-examples: '[]'
+    capabilities: Basic Install
+  name: morpheus-operator.v0.0.0
+  namespace: placeholder
+spec:
+  apiservicedefinitions: {}
+  customresourcedefinitions:
+    owned:
+    - description: Morpheus is the Schema for the morpheuses API
+      displayName: Morpheus
+      kind: Morpheus
+      name: morpheus.ai.redhat.com
+      statusDescriptors:
+      - displayName: Conditions
+        path: conditions
+      version: v1alpha1
+  description: Helps installs Nvidia Morpheus on an openshift and Kubernetes clusters
+  displayName: morpheus-operator
+  icon:
+  - base64data: ""
+    mediatype: ""
+  install:
+    spec:
+      deployments: null
+    strategy: ""
+  installModes:
+  - supported: false
+    type: OwnNamespace
+  - supported: false
+    type: SingleNamespace
+  - supported: false
+    type: MultiNamespace
+  - supported: true
+    type: AllNamespaces
+  keywords:
+  - ai
+  - morpheus
+  links:
+  - name: Morpheus Operator
+    url: https://morpheus-operator.domain
+  maintainers:
+  - email: zgrinber@redhat.com
+    name: zvigrinberg
+  maturity: alpha
+  provider:
+    name: redhat
+    url: redhat.com
+  version: 0.0.0
