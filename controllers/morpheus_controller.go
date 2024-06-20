@@ -43,14 +43,15 @@ type MorpheusReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-//+kubebuilder:rbac:groups=ai.redhat.com,resources=morpheuses,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=ai.redhat.com,resources=morpheuses/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=ai.redhat.com,resources=morpheuses/finalizers,verbs=update
+//+kubebuilder:rbac:groups=ai.redhat.com,resources=morpheus,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=ai.redhat.com,resources=morpheus/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=ai.redhat.com,resources=morpheus/finalizers,verbs=update
 //+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=core,resources=persistentvolumeclaim,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=rbac,resources=role;rolebinding,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=*,resources=services,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=*,resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=*,resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=security.openshift.io,resources=securitycontextconstraints,verbs=use
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.

@@ -6,9 +6,33 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
-  - ai.redhat.com
+  - '*'
   resources:
-  - morpheuses
+  - persistentvolumeclaims
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - '*'
+  resources:
+  - serviceaccounts
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - '*'
+  resources:
+  - services
   verbs:
   - create
   - delete
@@ -20,13 +44,25 @@ rules:
 - apiGroups:
   - ai.redhat.com
   resources:
-  - morpheuses/finalizers
+  - morpheus
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ai.redhat.com
+  resources:
+  - morpheus/finalizers
   verbs:
   - update
 - apiGroups:
   - ai.redhat.com
   resources:
-  - morpheuses/status
+  - morpheus/status
   verbs:
   - get
   - patch
@@ -44,9 +80,10 @@ rules:
   - update
   - watch
 - apiGroups:
-  - ""
+  - rbac.authorization.k8s.io
   resources:
-  - persistentvolumeclaim
+  - rolebindings
+  - roles
   verbs:
   - create
   - delete
@@ -56,39 +93,8 @@ rules:
   - update
   - watch
 - apiGroups:
-  - ""
+  - security.openshift.io
   resources:
-  - serviceaccounts
+  - securitycontextconstraints
   verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - ""
-  resources:
-  - services
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - rbac
-  resources:
-  - role
-  - rolebinding
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
+  - use
