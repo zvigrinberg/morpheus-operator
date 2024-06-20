@@ -32,7 +32,7 @@ metadata:
         }
       ]
     capabilities: Basic Install
-    createdAt: "2024-06-20T06:42:28Z"
+    createdAt: "2024-06-20T11:12:39Z"
     operators.operatorframework.io/builder: operator-sdk-v1.31.0-ocp
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v3
   name: morpheus-operator.v0.0.1
@@ -59,9 +59,33 @@ spec:
       clusterPermissions:
       - rules:
         - apiGroups:
-          - ai.redhat.com
+          - '*'
           resources:
-          - morpheuses
+          - persistentvolumeclaims
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - '*'
+          resources:
+          - serviceaccounts
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - '*'
+          resources:
+          - services
           verbs:
           - create
           - delete
@@ -73,13 +97,25 @@ spec:
         - apiGroups:
           - ai.redhat.com
           resources:
-          - morpheuses/finalizers
+          - morpheus
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - ai.redhat.com
+          resources:
+          - morpheus/finalizers
           verbs:
           - update
         - apiGroups:
           - ai.redhat.com
           resources:
-          - morpheuses/status
+          - morpheus/status
           verbs:
           - get
           - patch
@@ -97,9 +133,10 @@ spec:
           - update
           - watch
         - apiGroups:
-          - ""
+          - rbac.authorization.k8s.io
           resources:
-          - persistentvolumeclaim
+          - rolebindings
+          - roles
           verbs:
           - create
           - delete
@@ -109,42 +146,11 @@ spec:
           - update
           - watch
         - apiGroups:
-          - ""
+          - security.openshift.io
           resources:
-          - serviceaccounts
+          - securitycontextconstraints
           verbs:
-          - create
-          - delete
-          - get
-          - list
-          - patch
-          - update
-          - watch
-        - apiGroups:
-          - ""
-          resources:
-          - services
-          verbs:
-          - create
-          - delete
-          - get
-          - list
-          - patch
-          - update
-          - watch
-        - apiGroups:
-          - rbac
-          resources:
-          - role
-          - rolebinding
-          verbs:
-          - create
-          - delete
-          - get
-          - list
-          - patch
-          - update
-          - watch
+          - use
         - apiGroups:
           - authentication.k8s.io
           resources:
