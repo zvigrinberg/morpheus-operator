@@ -627,7 +627,6 @@ func deployMinio(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha
 	}
 	if resourceCreated {
 		UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMinio, metav1.ConditionTrue, "Reconciling:Create", "Minio Instance successfully Deployed!")
-		UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMinio, metav1.ConditionTrue, "Reconciling:Create", "Minio Instance successfully Deployed!")
 	}
 	return thereWasAnUpdate, nil
 }
