@@ -97,6 +97,6 @@ rules:
   resources:
   - securitycontextconstraints
   resourceNames:
-    - anyuid
+  - anyuid
   verbs:
   - use

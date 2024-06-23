@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/created-by: morpheus-operator
     hello: there2
   name: morpheus-sample
-  namespace: zvika-test
+  namespace: zvika-test2
 spec:
   serviceAccountName: morpheus-sa
   autoBindSccToSa: true
