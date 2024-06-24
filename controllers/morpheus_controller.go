@@ -750,14 +750,14 @@ func deployTritonServer(r *MorpheusReconciler, ctx context.Context, morpheus *ai
 			log.Error(err, baseErrorMessage, "Service.Namespace", serviceTriton.Namespace, "Service.Name", serviceTriton.Name)
 			UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedTritonServer, metav1.ConditionFalse, "Reconciling:Create:Service:Error", baseErrorMessage+" ->"+err.Error())
 			return thereWasAnUpdate, err
+		} else {
+			resourceCreated = true
 		}
 	} else if err != nil {
 		const errorMessage = "Failed to get Triton Server Service"
 		log.Error(err, errorMessage)
 		UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedTritonServer, metav1.ConditionFalse, "Reconciling:Fetch:Service:Error", errorMessage+" ->"+err.Error())
 		return thereWasAnUpdate, err
-	} else {
-		resourceCreated = true
 	}
 	if resourceCreated {
 		UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedTritonServer, metav1.ConditionTrue, "Reconciling:Create", "Triton Server successfully Deployed!")
