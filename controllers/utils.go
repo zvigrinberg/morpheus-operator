@@ -59,6 +59,8 @@ func UpdateCrStatusPerType(ctx context.Context, morpheus *aiv1alpha1.Morpheus, r
 		if err := r.Status().Update(ctx, morpheus); err != nil {
 			log.Error(err, fmt.Sprintf("Failed to update Morpheus status Type %s with status: %s, because of reason ->%s", conditionType, status, reason))
 			return err
+		} else {
+			log.Info(fmt.Sprintf("Successfully updated Morpheus status Type %s with status: %s, because of reason ->%s", conditionType, status, reason))
 		}
 	} else {
 		return errors.New(fmt.Sprintf("ConditionType paramater must be one of => %v", allTypes))
