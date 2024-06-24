@@ -1,12 +1,19 @@
 # morpheus-operator
-// TODO(user): Add simple overview of use/purpose
+ This is An k8/Openshift Operator to install Nvidia Morpheus on cluster, in order to bootstrap working
+ on Morpheus SDK in order to run sample/example/custom user pipelines.
 
 ## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+This operator runs on an openshift cluster/k8 cluster, and It Deploys Nvidia Morpheus Deployment along all of its dependencies
 
-## Getting Started
-You’ll need a Kubernetes cluster to run against. You can use [KIND](https://sigs.k8s.io/kind) to get a local cluster for testing, or run against a remote cluster.
-**Note:** Your controller will automatically use the current context in your kubeconfig file (i.e. whatever cluster `kubectl cluster-info` shows).
+1. Morpheus Deployment and configure its environment automatically.
+2. Triton Server Deployment 
+3. Download some models and install them automatically on Triton Server  
+4. Milvus Vector DB and its Underlying Etcd And Minio Instances As Standalone deployments and services.
+
+
+## Quick-Start
+You’ll need an openshift/Kubernetes cluster to run against. You can use [KIND](https://sigs.k8s.io/kind) to get a local cluster for testing, or run against a remote cluster.
+**Note:** Your controller will automatically use the current context in your kubeconfig file (i.e. whatever cluster `oc cluster-info` shows).
 
 ### Running on the cluster
 1. Install Instances of Custom Resources:
@@ -21,7 +28,7 @@ kubectl apply -f config/samples/
 make docker-build docker-push IMG=<some-registry>/morpheus-operator:tag
 ```
 
-3. Deploy the controller to the cluster with the image specified by `IMG`:
+3. Deploy the Operator to the cluster with the image specified by `IMG`:
 
 ```sh
 make deploy IMG=<some-registry>/morpheus-operator:tag
@@ -35,14 +42,207 @@ make uninstall
 ```
 
 ### Undeploy controller
-UnDeploy the controller from the cluster:
+UnDeploy the Operator from the cluster:
 
 ```sh
 make undeploy
 ```
 
-## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
+### Run The Operator Locally
+
+1. Run the operator locally on your machine
+```shell
+ make install run
+```
+
+2. Create some new project in openshift ( or namespace if running on k8)
+```shell
+oc new-project morpheus-test
+```
+
+3. On another termina, apply to the cluster a sample `Morpheus` CR ( Custom resource)
+```shell
+oc apply -f config/samples/ai_v1alpha1_morpheus.yaml 
+```
+
+4. Check that all deployments and pod created
+```shell
+oc get deployments,pods
+```
+5. Press on `Ctrl+Z` or `Ctrl+C` to quit the running operator, and then remove CRD from cluster
+```shell
+make uninstall
+```
+
+## Build And Install Operator Using OLM ( Operator Lifecycle Manager)
+
+1. Define the following environment variable according to the version to build, and according to user/namespace/org in image registry
+```shell
+# change to the current operator version 
+export MORPHEUS_VERSION=0.0.2
+export VERSION=${MORPHEUS_VERSION}
+# Set change to your username/org/namespace in your container registry.
+export USER_NAMESPACE=zgrinber
+export MORPHEUS_IMAGE_BASE=quay.io/${USER_NAMESPACE}/morpheus-operator
+export IMAGE_BUNDLE_BASE=quay.io/${USER_NAMESPACE}/morpheus-operator-bundle
+export MORPHEUS_BUNDLE_VERSION=v0.0.2
+```
+
+2. Login to your container registry using your credentials, for example:
+```shell
+podman login quay.io
+```
+3. Build Operator Container Image and push it to registry
+```shell
+IMG=${MORPHEUS_IMAGE_BASE}:${MORPHEUS_VERSION} make docker-build docker-push
+```
+4. Build Operator Bundle image and push it to registry
+```shell
+IMG=${MORPHEUS_IMAGE_BASE}:${MORPHEUS_VERSION} BUNDLE_IMG=${IMAGE_BUNDLE_BASE}:${MORPHEUS_BUNDLE_VERSION} make bundle bundle-build bundle-push
+```
+5. Now Run the bundle and deploy the Operator to the cluster all at once
+```shell
+operator-sdk run bundle ${IMAGE_BUNDLE_BASE}:${MORPHEUS_BUNDLE_VERSION}
+```
+
+6. Check that the operator installed correctly ( wait until PHASE=`Succeeded`)
+```shell
+oc get csv morpheus-operator.v0.0.2 -w
+```
+
+7. Create a new project 
+```shell
+oc new-project morpheus-test-cr
+```
+
+8. Create a sample Custom Resource on that Project
+```shell
+cat > morpheus-cr.yaml << EOF
+apiVersion: ai.redhat.com/v1alpha1
+kind: Morpheus
+metadata:
+  labels:
+    app.kubernetes.io/name: morpheus
+    app.kubernetes.io/instance: morpheus-sample
+    app.kubernetes.io/part-of: morpheus-operator
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: morpheus-operator
+  name: morpheus-example
+spec:
+  serviceAccountName: morpheus-sa
+  autoBindSccToSa: true
+  milvus:
+    minio:
+      rootUser: admin
+      rootPassword: admin123#
+EOF
+
+oc apply -f morpheus-cr.yaml
+```
+9. Watch the created resources:
+```shell
+watch "oc get morpheus,sa,role,rolebinding,pvc,deployment,pods,svc -o wide"
+```
+Output:
+```shell
+NAME                                      AGE
+morpheus.ai.redhat.com/morpheus-example   76m
+
+NAME                         SECRETS   AGE
+serviceaccount/morpheus-sa   1         76m
+
+NAME                                              CREATED AT
+role.rbac.authorization.k8s.io/morpheus-example   2024-06-24T16:29:46Z
+
+NAME                                                                                                    ROLE                                    AGE
+
+
+rolebinding.rbac.authorization.k8s.io/morpheus-example                                                  Role/morpheus-example                   76m
+
+
+NAME                                      STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+persistentvolumeclaim/milvus-data         Bound    pvc-67d5c557-ae63-4684-8562-5454eb1f5a69   2Gi        RWO            gp3            76m
+persistentvolumeclaim/milvus-etcd-data    Bound    pvc-51dcdf6c-b349-4a76-94ab-aecfcf7f364a   2Gi        RWO            gp3            76m
+persistentvolumeclaim/milvus-minio-data   Bound    pvc-0dc3e64d-39f4-457f-85b6-0f7a4ff5d6c5   2Gi        RWO            gp3            76m
+persistentvolumeclaim/morpheus-repo       Bound    pvc-86ccd3b7-900b-4717-8c2b-049d7f3b2f2b   20Gi       RWO            gp3            76m
+
+NAME                                READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/milvus-etcd         1/1     1            1           76m
+deployment.apps/milvus-minio        1/1     1            1           76m
+deployment.apps/milvus-standalone   1/1     1            1           76m
+deployment.apps/morpheus-example    1/1     1            1           76m
+deployment.apps/triton-server       1/1     1            1           76m
+
+NAME                                    READY   STATUS    RESTARTS      AGE
+pod/milvus-etcd-747cd8b6b9-2rtw8        1/1     Running   0             76m
+pod/milvus-minio-5d4dd775d7-wxkfg       1/1     Running   0             76m
+pod/milvus-standalone-58b7f696-k988n    1/1     Running   1 (75m ago)   76m
+pod/morpheus-example-546c9767f4-4qppj   1/1     Running   0             76m
+pod/triton-server-5865c9bfd5-v6lfd      1/1     Running   0             76m
+
+NAME                        TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)                      AGE
+service/milvus-etcd         ClusterIP   172.30.136.103   <none>        2379/TCP                     76m
+service/milvus-minio        ClusterIP   172.30.59.72     <none>        9000/TCP,9001/TCP            76m
+service/milvus-standalone   ClusterIP   172.30.180.225   <none>        19530/TCP,9091/TCP           76m
+service/triton-server       ClusterIP   172.30.245.119   <none>        8001/TCP,8000/TCP,8002/TCP   76m
+```
+10. See the Morpheus Custom resource instance Status 
+```shell
+oc describe morpheus morpheus-example
+```
+Output
+```shell
+Name:         morpheus-example
+Namespace:    morpheus-zvika
+Labels:       app.kubernetes.io/created-by=morpheus-operator
+              app.kubernetes.io/instance=morpheus-sample
+              app.kubernetes.io/managed-by=kustomize
+              app.kubernetes.io/name=morpheus
+              app.kubernetes.io/part-of=morpheus-operator
+Annotations:  <none>
+API Version:  ai.redhat.com/v1alpha1
+Kind:         Morpheus
+Metadata:
+  Creation Timestamp:  2024-06-24T16:29:46Z
+  Generation:          1
+  Resource Version:    429925118
+  UID:                 aa9c9a8c-d102-47f2-a6f6-e909f68e3644
+Spec:
+  Auto Bind Scc To Sa:  true
+  Milvus:
+    Minio:
+      Root Password:     admin123#
+      Root User:         admin
+  Service Account Name:  morpheus-sa
+Status:
+  Conditions:
+    Last Transition Time:  2024-06-24T16:29:46Z
+    Message:               Morpheus Deployment successfully created and deployed!
+    Reason:                Reconciling:Create
+    Status:                True
+    Type:                  MorpheusDeployed
+    Last Transition Time:  2024-06-24T16:29:46Z
+    Message:               Triton Server successfully Deployed!
+    Reason:                Reconciling:Create
+    Status:                True
+    Type:                  TritonDeployed
+    Last Transition Time:  2024-06-24T16:29:46Z
+    Message:               Etcd Instance successfully Deployed!
+    Reason:                Reconciling:Create
+    Status:                True
+    Type:                  EtcdDeployed
+    Last Transition Time:  2024-06-24T16:29:46Z
+    Message:               Minio Instance successfully Deployed!
+    Reason:                Reconciling:Create
+    Status:                True
+    Type:                  MinioDeployed
+    Last Transition Time:  2024-06-24T16:29:46Z
+    Message:               MilvusDB Instance successfully Deployed!
+    Reason:                Reconciling:Create
+    Status:                True
+    Type:                  MilvusDBDeployed
+Events:                    <none>
+```
 
 ### How it works
 This project aims to follow the Kubernetes [Operator pattern](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/).
@@ -50,20 +250,6 @@ This project aims to follow the Kubernetes [Operator pattern](https://kubernetes
 It uses [Controllers](https://kubernetes.io/docs/concepts/architecture/controller/),
 which provide a reconcile function responsible for synchronizing resources until the desired state is reached on the cluster.
 
-### Test It Out
-1. Install the CRDs into the cluster:
-
-```sh
-make install
-```
-
-2. Run your controller (this will run in the foreground, so switch to a new terminal if you want to leave it running):
-
-```sh
-make run
-```
-
-**NOTE:** You can also run this in one step by running: `make install run`
 
 ### Modifying the API definitions
 If you are editing the API definitions, generate the manifests such as CRs or CRDs using:

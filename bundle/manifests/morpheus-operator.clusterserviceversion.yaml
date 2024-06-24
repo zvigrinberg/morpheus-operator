@@ -17,7 +17,7 @@ metadata:
               "hello": "there2"
             },
             "name": "morpheus-sample",
-            "namespace": "zvika-test"
+            "namespace": "zvika-test2"
           },
           "spec": {
             "autoBindSccToSa": true,
@@ -32,10 +32,10 @@ metadata:
         }
       ]
     capabilities: Basic Install
-    createdAt: "2024-06-20T11:12:39Z"
+    createdAt: "2024-06-24T16:19:56Z"
     operators.operatorframework.io/builder: operator-sdk-v1.31.0-ocp
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v3
-  name: morpheus-operator.v0.0.1
+  name: morpheus-operator.v0.0.2
   namespace: placeholder
 spec:
   apiservicedefinitions: {}
@@ -147,6 +147,8 @@ spec:
           - watch
         - apiGroups:
           - security.openshift.io
+          resourceNames:
+          - anyuid
           resources:
           - securitycontextconstraints
           verbs:
@@ -233,7 +235,7 @@ spec:
                 - --leader-elect
                 command:
                 - /manager
-                image: quay.io/zgrinber/morpheus-operator:0.0.1
+                image: quay.io/zgrinber/morpheus-operator:0.0.2
                 livenessProbe:
                   httpGet:
                     path: /healthz
@@ -320,4 +322,4 @@ spec:
   provider:
     name: redhat
     url: redhat.com
-  version: 0.0.1
+  version: 0.0.2
