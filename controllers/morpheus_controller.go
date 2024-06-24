@@ -25,7 +25,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"strings"
 
 	aiv1alpha1 "github.com/zvigrinberg/morpheus-operator/api/v1alpha1"
@@ -822,6 +824,34 @@ func labelsForComponent(name string, version string, component string) map[strin
 	return mapOfLabels
 }
 
+func ignoreRedundantEvents() predicate.Predicate {
+	return predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			// Ignore updates to CR status in which case metadata.Generation does not change
+			return e.ObjectOld.GetGeneration() != e.ObjectNew.GetGeneration()
+		},
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			// Evaluates to false if the object has been confirmed deleted.
+			return !e.DeleteStateUnknown
+		},
+		GenericFunc: func(e event.GenericEvent) bool {
+			// Evaluates to false if the object has been confirmed deleted.
+			return false
+		},
+		CreateFunc: func(e event.CreateEvent) bool {
+			// Evaluates to false if the object has been confirmed deleted.
+			switch item := e.Object.(type) {
+			case *aiv1alpha1.Morpheus:
+				println("Handling Morpheus type instance ->" + item.GetName())
+				return true
+			default:
+				return false
+			}
+
+		},
+	}
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *MorpheusReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
@@ -832,6 +862,7 @@ func (r *MorpheusReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.ServiceAccount{}).
 		Owns(&rbacv1.Role{}).
 		Owns(&rbacv1.RoleBinding{}).
+		WithEventFilter(ignoreRedundantEvents()).
 		Complete(r)
 }
 
