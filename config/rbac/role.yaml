@@ -94,9 +94,9 @@ rules:
   - watch
 - apiGroups:
   - security.openshift.io
-  resources:
-  - securitycontextconstraints
   resourceNames:
   - anyuid
+  resources:
+  - securitycontextconstraints
   verbs:
   - use
