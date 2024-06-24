@@ -788,18 +788,17 @@ func (r *MorpheusReconciler) createMorpheusDeployment(m *aiv1alpha1.Morpheus) *a
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{{
-						Image:   "nvcr.io/nvidia/morpheus/morpheus:v24.03.02-runtime",
 						Name:    "morpheus",
-						Command: []string{"sleep", "infinity"},
+						Image:   "nvcr.io/nvidia/morpheus/morpheus:v24.03.02-runtime",
+						Command: []string{"bash"},
+						Args:    []string{"-c", "echo Starting Updating Conda environment with all prerequisites... ; mamba env update -n $(CONDA_DEFAULT_ENV) --file /workspace/conda/environments/all_cuda-121_arch-x86_64.yaml ; echo Done Updating Morpheus Conda environment, Morpheus is Ready! ;sleep infinity"},
+						Env: []corev1.EnvVar{{
+							Name:  "CONDA_DEFAULT_ENV",
+							Value: "morpheus",
+						},
+						},
 						SecurityContext: &corev1.SecurityContext{
 							RunAsUser: &user,
-						},
-						Lifecycle: &corev1.Lifecycle{
-							PostStart: &corev1.LifecycleHandler{
-								Exec: &corev1.ExecAction{
-									Command: []string{"bash", "-c", "mamba env update -n ${CONDA_DEFAULT_ENV} --file /workspace/conda/environments/all_cuda-121_arch-x86_64.yaml"},
-								},
-							},
 						},
 					}},
 					ServiceAccountName: m.Spec.ServiceAccountName,
