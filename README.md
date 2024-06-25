@@ -11,6 +11,10 @@ This operator runs on an openshift cluster/k8 cluster, and It Deploys Nvidia Mor
 4. Milvus Vector DB and its Underlying Etcd And Minio Instances As Standalone deployments and services.
 
 
+Note: In order to deploy the operator on a cluster, your user should have a cluster-admin `ClusterRole` bound to it, or at least
+all the permissions depicted in [this RBAC Role](./config/rbac/role.yaml)
+
+
 ## Quick-Start
 You’ll need an openshift/Kubernetes cluster to run against. You can use [KIND](https://sigs.k8s.io/kind) to get a local cluster for testing, or run against a remote cluster.
 **Note:** Your controller will automatically use the current context in your kubeconfig file (i.e. whatever cluster `oc cluster-info` shows).
