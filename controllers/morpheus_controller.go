@@ -834,11 +834,11 @@ func ignoreRedundantEvents() predicate.Predicate {
 			return !e.DeleteStateUnknown
 		},
 		GenericFunc: func(e event.GenericEvent) bool {
-			// Evaluates to false if the object has been confirmed deleted.
+			// Filter out anyway GenericEvent events, which are irrelevant.
 			return false
 		},
 		CreateFunc: func(e event.CreateEvent) bool {
-			// Evaluates to false if the object has been confirmed deleted.
+			// Evaluates to false if the object type is not of kind `Morpheus`
 			switch item := e.Object.(type) {
 			case *aiv1alpha1.Morpheus:
 				println("Handling Morpheus type instance ->" + item.GetName())
