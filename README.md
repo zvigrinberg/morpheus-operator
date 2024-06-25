@@ -64,7 +64,7 @@ make undeploy
 oc new-project morpheus-test
 ```
 
-3. On another termina, apply to the cluster a sample `Morpheus` CR ( Custom resource)
+3. On another terminal, apply to the cluster a sample `Morpheus` CR ( Custom resource)
 ```shell
 oc apply -f config/samples/ai_v1alpha1_morpheus.yaml 
 ```
