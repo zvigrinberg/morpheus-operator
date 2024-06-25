@@ -80,7 +80,7 @@ make uninstall
 
 ## Build And Install Operator Using OLM ( Operator Lifecycle Manager)
 
-1. Define the following environment variable according to the version to build, and according to user/namespace/org in image registry
+1. Define the following environment variables according to the version to build, and according to user/namespace/org in image registry
 ```shell
 # change to the current operator version 
 export MORPHEUS_VERSION=0.0.2
