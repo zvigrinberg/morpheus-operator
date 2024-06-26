@@ -43,16 +43,21 @@ type MilvusSpec struct {
 	StoragePvcSize string    `json:"storagePvcSize,omitempty"`
 }
 
+type JupyterSpec struct {
+	JupyterPassword string `json:"jupyterPassword,omitempty"`
+}
+
 // MorpheusSpec defines the desired state of Morpheus
 type MorpheusSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// Service account of running all deployments of Morpheus. Edit morpheus_types.go to remove/update
-	ServiceAccountName string     `json:"serviceAccountName,omitempty"`
-	AutoBindSccToSa    bool       `json:"autoBindSccToSa,omitempty"`
-	Milvus             MilvusSpec `json:"milvus,omitempty"`
-	TritonServer       TritonSpec `json:"tritonServer,omitempty"`
+	ServiceAccountName string      `json:"serviceAccountName,omitempty"`
+	AutoBindSccToSa    bool        `json:"autoBindSccToSa,omitempty"`
+	Milvus             MilvusSpec  `json:"milvus,omitempty"`
+	TritonServer       TritonSpec  `json:"tritonServer,omitempty"`
+	Jupyter            JupyterSpec `json:"jupyter,omitempty"`
 }
 
 // MorpheusStatus defines the observed state of Morpheus

@@ -33,6 +33,7 @@ import (
 
 	aiv1alpha1 "github.com/zvigrinberg/morpheus-operator/api/v1alpha1"
 	"github.com/zvigrinberg/morpheus-operator/controllers"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -65,10 +66,13 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
+	metricsServerOptions := metricsserver.Options{
+		BindAddress: metricsAddr,
+	}
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
-		MetricsBindAddress:     metricsAddr,
-		Port:                   9443,
+		Metrics:                metricsServerOptions,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "1f63e6ea.redhat.com",

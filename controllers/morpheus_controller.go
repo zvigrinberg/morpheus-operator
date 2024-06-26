@@ -18,25 +18,29 @@ package controllers
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"github.com/go-logr/logr"
-	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/intstr"
-	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
-	"strings"
-
+	routev1 "github.com/openshift/api/route/v1"
+	"github.com/thanhpk/randstr"
 	aiv1alpha1 "github.com/zvigrinberg/morpheus-operator/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"strings"
 )
 
 // MorpheusReconciler reconciles a Morpheus object
@@ -44,6 +48,10 @@ type MorpheusReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 }
+
+const (
+	jupyterPasswordHash = "jupyter-password-hash"
+)
 
 //+kubebuilder:rbac:groups=ai.redhat.com,resources=morpheus,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=ai.redhat.com,resources=morpheus/status,verbs=get;update;patch
@@ -89,69 +97,10 @@ func (r *MorpheusReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, err
 	}
 	err = InitializeCrStatusImpl(ctx, morpheus, r)
-	morpheusSA := &corev1.ServiceAccount{}
-	if strings.TrimSpace(morpheus.Spec.ServiceAccountName) == "" {
-		morpheus.Spec.ServiceAccountName = "morpheus-sa"
-	}
-	// checks if service account for morpheus exists
-	err = r.Get(ctx, types.NamespacedName{Name: morpheus.Spec.ServiceAccountName, Namespace: morpheus.Namespace}, morpheusSA)
-	if err != nil && errors.IsNotFound(err) {
-		// Define and create a new Service Account.
-		var saMorpheus *corev1.ServiceAccount
-		saMorpheus = r.morpheusServiceAccount(morpheus)
-		log.Info("Creating a new Service Account", "ServiceAccount.Namespace", saMorpheus.Namespace, "ServiceAccount.Name", saMorpheus.Name)
-		err = r.Create(ctx, saMorpheus)
-		if err != nil {
-			log.Error(err, "Failed to create new Service Account", "Deployment.Namespace", saMorpheus.Namespace, "Deployment.Name", saMorpheus.Name)
-			return ctrl.Result{}, err
-		}
-	} else if err != nil {
-		log.Error(err, "Failed to get Service Account")
+	thereWasAnUpdate, err = deployMorpheusWithJupyter(ctx, morpheus, err, r, log)
+	if err != nil {
+		log.Error(err, "Failed to Deploy Morpheus with Jupyter Lab")
 		return ctrl.Result{}, err
-	}
-	autoBindSccToSa := &morpheus.Spec.AutoBindSccToSa
-	// default to add anyuid scc (Security Context Constraint) to service account
-	if autoBindSccToSa == nil {
-		morpheus.Spec.AutoBindSccToSa = true
-	}
-	if morpheus.Spec.AutoBindSccToSa {
-		err2, result := createAnyUidSecurityContextConstraint(ctx, r, morpheus, log)
-		if err2 != nil {
-			return result, err2
-		}
-	}
-	// Checks Whether Morpheus deployment exists.
-	morpheusDeployment := &appsv1.Deployment{}
-	err = r.Get(ctx, types.NamespacedName{Name: morpheus.Name, Namespace: morpheus.Namespace}, morpheusDeployment)
-	if err != nil && errors.IsNotFound(err) {
-		// Define a new deployment
-		deploymentMorpheus := r.createMorpheusDeployment(morpheus)
-		log.Info("Creating a new Deployment", "Deployment.Namespace", deploymentMorpheus.Namespace, "Deployment.Name", deploymentMorpheus.Name)
-		err = r.Create(ctx, deploymentMorpheus)
-		if err != nil {
-			log.Error(err, "Failed to create new Morpheus Deployment", "Deployment.Namespace", deploymentMorpheus.Namespace, "Deployment.Name", deploymentMorpheus.Name)
-			UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMorpheus, metav1.ConditionFalse, "Reconciling:Creation:Error", err.Error())
-			return ctrl.Result{}, err
-		}
-		UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMorpheus, metav1.ConditionTrue, "Reconciling:Create", "Morpheus Deployment successfully created and deployed!")
-	} else if err != nil {
-		const errorMessage = "Failed to get Morpheus Deployment"
-		log.Error(err, errorMessage)
-		UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMorpheus, metav1.ConditionFalse, "Reconciling:Deployment:Fetch:Error", errorMessage+"->"+err.Error())
-		return ctrl.Result{}, err
-	} else {
-		serviceAccountDeployment := morpheusDeployment.Spec.Template.Spec.ServiceAccountName
-		if serviceAccountDeployment != morpheus.Spec.ServiceAccountName {
-			morpheusDeployment.Spec.Template.Spec.ServiceAccountName = morpheus.Spec.ServiceAccountName
-			err = r.Update(ctx, morpheusDeployment)
-			if err != nil {
-				log.Error(err, "Failed to update Morpheus Deployment", "Deployment.Namespace", morpheusDeployment.Namespace, "Deployment.Name", morpheusDeployment.Name)
-				UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMorpheus, metav1.ConditionFalse, "Reconciling:Update:Error", err.Error())
-				return ctrl.Result{}, err
-			}
-			thereWasAnUpdate = true
-			UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMorpheus, metav1.ConditionTrue, "Reconciling:Update", "Morpheus Deployment successfully Updated!")
-		}
 	}
 
 	thereWasAnUpdate, err = deployTritonServer(r, ctx, morpheus, log)
@@ -171,7 +120,190 @@ func (r *MorpheusReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 }
 
-func createAnyUidSecurityContextConstraint(ctx context.Context, r *MorpheusReconciler, morpheus *aiv1alpha1.Morpheus, log logr.Logger) (error, ctrl.Result) {
+func deployMorpheusWithJupyter(ctx context.Context, morpheus *aiv1alpha1.Morpheus, err error, r *MorpheusReconciler, log logr.Logger) (bool, error) {
+	thereWasAnUpdate := false
+	morpheusSA := &corev1.ServiceAccount{}
+	if strings.TrimSpace(morpheus.Spec.ServiceAccountName) == "" {
+		morpheus.Spec.ServiceAccountName = "morpheus-sa"
+	}
+	// checks if service account for morpheus exists
+	err = r.Get(ctx, types.NamespacedName{Name: morpheus.Spec.ServiceAccountName, Namespace: morpheus.Namespace}, morpheusSA)
+	if err != nil && errors.IsNotFound(err) {
+		// Define and create a new Service Account.
+		var saMorpheus *corev1.ServiceAccount
+		saMorpheus = r.morpheusServiceAccount(morpheus)
+		log.Info("Creating a new Service Account", "ServiceAccount.Namespace", saMorpheus.Namespace, "ServiceAccount.Name", saMorpheus.Name)
+		err = r.Create(ctx, saMorpheus)
+		if err != nil {
+			log.Error(err, "Failed to create new Service Account", "Deployment.Namespace", saMorpheus.Namespace, "Deployment.Name", saMorpheus.Name)
+			return thereWasAnUpdate, err
+		}
+	} else if err != nil {
+		log.Error(err, "Failed to get Service Account")
+		return thereWasAnUpdate, err
+	}
+	autoBindSccToSa := &morpheus.Spec.AutoBindSccToSa
+	// default to add anyuid scc (Security Context Constraint) to service account
+	if autoBindSccToSa == nil {
+		morpheus.Spec.AutoBindSccToSa = true
+	}
+	if morpheus.Spec.AutoBindSccToSa {
+		err = createAnyUidSecurityContextConstraint(ctx, r, morpheus, log)
+		if err != nil {
+			return thereWasAnUpdate, err
+		}
+	}
+	jupyterPassword := &corev1.Secret{}
+	secretName := morpheus.Name + "-jupyter-token"
+	const secretKey = "JUPYTER_TOKEN"
+	secretWasChanged := false
+	var md5HashOfSecret string
+	err = r.Get(ctx, types.NamespacedName{Name: secretName, Namespace: morpheus.Namespace}, jupyterPassword)
+	if err != nil && errors.IsNotFound(err) {
+		randomTokenAsDefault := randstr.Hex(16)
+		tokenValue := getFromSpecElseDefault(morpheus.Spec.Jupyter.JupyterPassword, randomTokenAsDefault)
+		jupyterSecret := r.createSecret(morpheus, secretName, secretKey, getFromSpecElseDefault(morpheus.Spec.Jupyter.JupyterPassword, randomTokenAsDefault))
+		md5HashOfSecret = getMd5HashString(tokenValue)
+		log.Info("Creating a new Secret", "Secret.Namespace", jupyterSecret.Namespace, "Secret.Name", jupyterSecret.Name)
+		err = r.Create(ctx, jupyterSecret)
+		if err != nil {
+			log.Error(err, "Failed to create Jupyter Secret", "Secret.Namespace", jupyterSecret.Namespace, "Secret.Name", jupyterSecret.Name)
+			UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMorpheus, metav1.ConditionFalse, "Reconciling:Secret:Create:Error", err.Error())
+			return thereWasAnUpdate, err
+		}
+	} else if err != nil {
+		const errorMessage = "Failed to get Jupyter Secret"
+		log.Error(err, errorMessage)
+		UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMorpheus, metav1.ConditionFalse, "Reconciling:Secret:Fetch:Error", errorMessage+"->"+err.Error())
+		return thereWasAnUpdate, err
+	} else {
+		// check if jupyter password was changed.
+		passwordValue, err := decodeBase64String(jupyterPassword.Data[secretKey])
+		if err != nil {
+			return false, err
+		} else if strings.TrimSpace(morpheus.Spec.Jupyter.JupyterPassword) != "" &&
+			strings.TrimSpace(morpheus.Spec.Jupyter.JupyterPassword) != strings.TrimSpace(string(passwordValue)) {
+			jupyterPassword.Data[secretKey] = encodeStringBase64(morpheus.Spec.Jupyter.JupyterPassword)
+			md5HashOfSecret = getMd5HashString(string(jupyterPassword.Data[secretKey]))
+			err = r.Update(ctx, jupyterPassword)
+			if err != nil {
+				log.Error(err, "Failed to update Jupyter Secret", "Secret.Namespace", jupyterPassword.Namespace, "Secret.Name", jupyterPassword.Name)
+				UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMorpheus, metav1.ConditionFalse, "Reconciling:Secret:Update:Error", err.Error())
+				return thereWasAnUpdate, err
+			}
+			thereWasAnUpdate = true
+			secretWasChanged = true
+		}
+	}
+	// Checks Whether Morpheus deployment exists.
+	morpheusDeployment := &appsv1.Deployment{}
+	err = r.Get(ctx, types.NamespacedName{Name: morpheus.Name, Namespace: morpheus.Namespace}, morpheusDeployment)
+	if err != nil && errors.IsNotFound(err) {
+		// Define a new deployment
+		deploymentMorpheus := r.createMorpheusDeployment(morpheus, md5HashOfSecret, secretName)
+		log.Info("Creating a new Deployment", "Deployment.Namespace", deploymentMorpheus.Namespace, "Deployment.Name", deploymentMorpheus.Name)
+		err = r.Create(ctx, deploymentMorpheus)
+		if err != nil {
+			log.Error(err, "Failed to create new Morpheus-Jupyter Deployment", "Deployment.Namespace", deploymentMorpheus.Namespace, "Deployment.Name", deploymentMorpheus.Name)
+			UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMorpheus, metav1.ConditionFalse, "Reconciling:Creation:Error", err.Error())
+			return thereWasAnUpdate, err
+		}
+		UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMorpheus, metav1.ConditionTrue, "Reconciling:Create", "Morpheus Deployment successfully created and deployed!")
+	} else if err != nil {
+		const errorMessage = "Failed to get Morpheus-Jupyter Deployment"
+		log.Error(err, errorMessage)
+		UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMorpheus, metav1.ConditionFalse, "Reconciling:Deployment:Fetch:Error", errorMessage+"->"+err.Error())
+		return thereWasAnUpdate, err
+	} else {
+		serviceAccountDeployment := morpheusDeployment.Spec.Template.Spec.ServiceAccountName
+		if serviceAccountDeployment != morpheus.Spec.ServiceAccountName || secretWasChanged {
+			if secretWasChanged {
+				morpheusDeployment.Spec.Template.Labels[jupyterPasswordHash] = md5HashOfSecret
+			} else {
+				morpheusDeployment.Spec.Template.Spec.ServiceAccountName = morpheus.Spec.ServiceAccountName
+			}
+
+			err = r.Update(ctx, morpheusDeployment)
+			if err != nil {
+				log.Error(err, "Failed to update Morpheus-jupyter-Deployment", "Deployment.Namespace", morpheusDeployment.Namespace, "Deployment.Name", morpheusDeployment.Name)
+				UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMorpheus, metav1.ConditionFalse, "Reconciling:Update:Error", err.Error())
+				return thereWasAnUpdate, err
+			}
+			thereWasAnUpdate = true
+			UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMorpheus, metav1.ConditionTrue, ternary(secretWasChanged, "Reconciling:Secret:Update", "Reconciling:Update"), "Morpheus-Jupyter Deployment successfully Updated!")
+		}
+	}
+	// Create A Morpheus-Jupyter Service
+	MorpheusJupyterSvc := &corev1.Service{}
+
+	err = r.Get(ctx, types.NamespacedName{Name: morpheus.Name, Namespace: morpheus.Namespace}, MorpheusJupyterSvc)
+
+	if err != nil && errors.IsNotFound(err) {
+		// Define a new Service
+		var serviceJupyter *corev1.Service
+		ports := []corev1.ServicePort{
+			{
+				Name:     "http",
+				Protocol: corev1.ProtocolTCP,
+				Port:     8888,
+				TargetPort: intstr.IntOrString{
+					Type:   intstr.Int,
+					IntVal: 8888,
+				},
+			},
+		}
+		selector := map[string]string{
+			"app":       "morpheus",
+			"component": "jupyter",
+		}
+		serviceJupyter = r.createService(morpheus, ports, morpheus.Name, selector)
+		log.Info("Creating a new Jupyter Service", "Service.Namespace", serviceJupyter.Namespace, "Service.Name", serviceJupyter.Name)
+		err = r.Create(ctx, serviceJupyter)
+		if err != nil {
+			log.Error(err, "Failed to create new Jupyter Service", "Service.Namespace", serviceJupyter.Namespace, "Service.Name", serviceJupyter.Name)
+			UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMorpheus, metav1.ConditionFalse, "Reconciling:Service:Create:Error", err.Error())
+			return false, err
+		}
+	} else if err != nil {
+		log.Error(err, "Failed to get Jupyter Service")
+		return false, err
+	}
+	jupyterRoute := &routev1.Route{}
+	err = r.Get(ctx, types.NamespacedName{Name: morpheus.Name, Namespace: morpheus.Namespace}, jupyterRoute)
+	if err != nil && errors.IsNotFound(err) {
+		// Create an openshift route to expose jupyter notebook outside the cluster
+		route := r.createRoute(morpheus)
+		err = r.Create(ctx, route)
+		if err != nil {
+			log.Error(err, "Failed to Expose new  Route to Jupyter service", "Route.Namespace", route.Namespace, "Route.Name", route.Name)
+			UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMorpheus, metav1.ConditionFalse, "Reconciling:Route:Create:Error", err.Error())
+			return false, err
+		}
+	} else if err != nil {
+		log.Error(err, "Failed to get Route to Jupyter Service")
+		return false, err
+	}
+	return thereWasAnUpdate, nil
+}
+
+func ternary(condition bool, valueIfConditionIsTrue string, valueIfConditionIsFalse string) string {
+	if condition {
+		return valueIfConditionIsTrue
+	} else {
+		return valueIfConditionIsFalse
+	}
+}
+
+func getMd5HashString(data string) string {
+	hash := md5.Sum([]byte(data))
+	return string(hex.EncodeToString(hash[:]))
+}
+
+func decodeBase64String(data []byte) ([]byte, error) {
+	return base64.StdEncoding.DecodeString(string(data))
+}
+
+func createAnyUidSecurityContextConstraint(ctx context.Context, r *MorpheusReconciler, morpheus *aiv1alpha1.Morpheus, log logr.Logger) error {
 	// Checks Whether Morpheus Role exists.
 	morpheusAnyUidRole := &rbacv1.Role{}
 	err := r.Get(ctx, types.NamespacedName{Name: morpheus.Name, Namespace: morpheus.Namespace}, morpheusAnyUidRole)
@@ -183,11 +315,11 @@ func createAnyUidSecurityContextConstraint(ctx context.Context, r *MorpheusRecon
 		err = r.Create(ctx, roleMorpheus)
 		if err != nil {
 			log.Error(err, "Failed to create new anyuid Role", "Role.Namespace", roleMorpheus.Namespace, "Role.Name", roleMorpheus.Name)
-			return nil, ctrl.Result{}
+			return err
 		}
 	} else if err != nil {
 		log.Error(err, "Failed to get Role")
-		return nil, ctrl.Result{}
+		return err
 	}
 
 	// Checks Whether Morpheus RoleBinding exists.
@@ -201,13 +333,13 @@ func createAnyUidSecurityContextConstraint(ctx context.Context, r *MorpheusRecon
 		err = r.Create(ctx, roleBindingMorpheus)
 		if err != nil {
 			log.Error(err, "Failed to create new anyuid RoleBinding", "RoleBinding.Namespace", roleBindingMorpheus.Namespace, "RoleBinding.Name", roleBindingMorpheus.Name)
-			return err, ctrl.Result{}
+			return err
 		}
 	} else if err != nil {
 		log.Error(err, "Failed to get Role")
-		return err, ctrl.Result{}
+		return err
 	}
-	return nil, ctrl.Result{}
+	return nil
 }
 
 func deployMilvusDB(r *MorpheusReconciler, ctx context.Context, morpheus *aiv1alpha1.Morpheus, log logr.Logger) (bool, error) {
@@ -767,8 +899,9 @@ func deployTritonServer(r *MorpheusReconciler, ctx context.Context, morpheus *ai
 }
 
 // deploymentForMemcached returns a memcached Deployment object
-func (r *MorpheusReconciler) createMorpheusDeployment(m *aiv1alpha1.Morpheus) *appsv1.Deployment {
-	labels := labelsForComponent("morpheus", "v24.03.02", "")
+func (r *MorpheusReconciler) createMorpheusDeployment(m *aiv1alpha1.Morpheus, secretHashValue string, secretName string) *appsv1.Deployment {
+	labels := labelsForComponent("morpheus", "v24.03.02", "jupyter")
+	labels[jupyterPasswordHash] = secretHashValue
 	var numOfReplicas int32 = 1
 	var user int64 = 0
 
@@ -788,14 +921,25 @@ func (r *MorpheusReconciler) createMorpheusDeployment(m *aiv1alpha1.Morpheus) *a
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{{
-						Name:    "morpheus",
-						Image:   "nvcr.io/nvidia/morpheus/morpheus:v24.03.02-runtime",
+						Name:    "morpheus-jupyter",
+						Image:   "quay.io/zgrinber/morpheus-jupyter:1",
 						Command: []string{"bash"},
-						Args:    []string{"-c", "echo Starting Updating Conda environment with all prerequisites... ; mamba env update -n $(CONDA_DEFAULT_ENV) --file /workspace/conda/environments/all_cuda-121_arch-x86_64.yaml ; echo Done Updating Morpheus Conda environment, Morpheus is Ready! ;sleep infinity"},
-						Env: []corev1.EnvVar{{
-							Name:  "CONDA_DEFAULT_ENV",
-							Value: "morpheus",
+						Args:    []string{"-c", "echo Starting Updating Conda environment with all prerequisites... ; mamba env update -n $(CONDA_DEFAULT_ENV) --file /workspace/conda/environments/all_cuda-121_arch-x86_64.yaml ; echo Done Updating Morpheus Conda environment, Morpheus is Ready, Starting Jupyter Lab!. ; jupyter-lab --ip=0.0.0.0 --no-browser --allow-root"},
+						EnvFrom: []corev1.EnvFromSource{
+							{
+								ConfigMapRef: nil,
+								SecretRef: &corev1.SecretEnvSource{
+									LocalObjectReference: corev1.LocalObjectReference{
+										Name: secretName,
+									},
+								},
+							},
 						},
+						Env: []corev1.EnvVar{
+							{
+								Name:  "CONDA_DEFAULT_ENV",
+								Value: "morpheus",
+							},
 						},
 						SecurityContext: &corev1.SecurityContext{
 							RunAsUser: &user,
@@ -853,6 +997,11 @@ func ignoreRedundantEvents() predicate.Predicate {
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *MorpheusReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	err := routev1.AddToScheme(mgr.GetScheme())
+	if err != nil {
+		println("Error intercepted in SetupWithManager=> error message => " + err.Error())
+		return err
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&aiv1alpha1.Morpheus{}).
 		Owns(&appsv1.Deployment{}).
@@ -861,6 +1010,7 @@ func (r *MorpheusReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.ServiceAccount{}).
 		Owns(&rbacv1.Role{}).
 		Owns(&rbacv1.RoleBinding{}).
+		Owns(&routev1.Route{}).
 		WithEventFilter(ignoreRedundantEvents()).
 		Complete(r)
 }
@@ -925,7 +1075,7 @@ func (r *MorpheusReconciler) createPvc(morpheus *aiv1alpha1.Morpheus, pvcName st
 			AccessModes: []corev1.PersistentVolumeAccessMode{
 				corev1.ReadWriteOnce,
 			},
-			Resources: corev1.ResourceRequirements{
+			Resources: corev1.VolumeResourceRequirements{
 				Requests: corev1.ResourceList{
 					corev1.ResourceStorage: resource.MustParse(pvcSize),
 				},
@@ -1298,4 +1448,45 @@ func (r *MorpheusReconciler) createMilvusDbDeployment(ctx context.Context, morph
 	// Set Morpheus instance as the owner and controller
 	ctrl.SetControllerReference(morpheus, dep, r.Scheme)
 	return dep
+}
+
+func (r *MorpheusReconciler) createSecret(morpheus *aiv1alpha1.Morpheus, secretName string, secretKey string, secretValue string) *corev1.Secret {
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      secretName,
+			Namespace: morpheus.Namespace,
+		},
+		Data: map[string][]byte{
+			secretKey: encodeStringBase64(secretValue),
+		},
+	}
+	ctrl.SetControllerReference(morpheus, secret, r.Scheme)
+	return secret
+}
+
+func (r *MorpheusReconciler) createRoute(morpheus *aiv1alpha1.Morpheus) *routev1.Route {
+	weight := int32(100)
+
+	routeSpec := routev1.RouteSpec{
+		Path: "", // No needed specific path required yet
+		To: routev1.RouteTargetReference{
+			Kind:   "Service",
+			Name:   morpheus.Name,
+			Weight: &weight,
+		},
+	}
+
+	route := &routev1.Route{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      morpheus.Name,
+			Namespace: morpheus.Namespace,
+		},
+		Spec: routeSpec,
+	}
+	ctrl.SetControllerReference(morpheus, route, r.Scheme)
+	return route
+}
+
+func encodeStringBase64(secretValue string) []byte {
+	return []byte(base64.StdEncoding.EncodeToString([]byte(secretValue)))
 }
