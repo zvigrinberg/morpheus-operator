@@ -231,9 +231,10 @@ func deployMorpheusWithJupyter(ctx context.Context, morpheus *aiv1alpha1.Morpheu
 			UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMorpheus, metav1.ConditionTrue, ternary(secretWasChanged, "Reconciling:Secret:Update", "Reconciling:Update"), "Morpheus-Jupyter Deployment successfully Updated!")
 		}
 	}
-	// Create A Morpheus-Jupyter Service MorpheusJupyterSvc := &corev1.Service{}
+	//Create A Morpheus-Jupyter Service
+	morpheusJupyterSvc := &corev1.Service{}
 
-	err = r.Get(ctx, types.NamespacedName{Name: morpheus.Name, Namespace: morpheus.Namespace}, MorpheusJupyterSvc)
+	err = r.Get(ctx, types.NamespacedName{Name: morpheus.Name, Namespace: morpheus.Namespace}, morpheusJupyterSvc)
 
 	if err != nil && errors.IsNotFound(err) {
 		// Define a new Service
@@ -923,7 +924,7 @@ func (r *MorpheusReconciler) createMorpheusDeployment(m *aiv1alpha1.Morpheus, se
 						Name:    "morpheus-jupyter",
 						Image:   "quay.io/zgrinber/morpheus-jupyter:1",
 						Command: []string{"bash"},
-						Args:    []string{"-c", "Morpheus is Ready, Starting Jupyter Lab!. ; jupyter-lab --ip=0.0.0.0 --no-browser --allow-root"},
+						Args:    []string{"-c", "(mamba env update -n ${CONDA_DEFAULT_ENV} --file /workspace/conda/environments/all_cuda-121_arch-x86_64.yaml &) ; jupyter-lab --ip=0.0.0.0 --no-browser --allow-root"},
 						EnvFrom: []corev1.EnvFromSource{
 							{
 								ConfigMapRef: nil,
@@ -943,6 +944,13 @@ func (r *MorpheusReconciler) createMorpheusDeployment(m *aiv1alpha1.Morpheus, se
 						SecurityContext: &corev1.SecurityContext{
 							RunAsUser: &user,
 						},
+						//Lifecycle: &corev1.Lifecycle{
+						//	PostStart: &corev1.LifecycleHandler{
+						//		Exec: &corev1.ExecAction{
+						//			Command: []string{"bash", "-c", "(mamba env update -n ${CONDA_DEFAULT_ENV} --file /workspace/conda/environments/all_cuda-121_arch-x86_64.yaml) &"},
+						//		},
+						//	},
+						//},
 					}},
 					ServiceAccountName: m.Spec.ServiceAccountName,
 					SecurityContext: &corev1.PodSecurityContext{
