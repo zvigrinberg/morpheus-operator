@@ -145,7 +145,7 @@ oc apply -f morpheus-cr.yaml
 ```
 9. Watch the created resources:
 ```shell
-watch "oc get morpheus,sa,role,rolebinding,pvc,deployment,pods,svc -o wide"
+watch "oc get morpheus,sa,role,rolebinding,pvc,deployment,pods,svc,route -o wide"
 ```
 Output:
 ```shell
@@ -247,6 +247,42 @@ Status:
     Type:                  MilvusDBDeployed
 Events:                    <none>
 ```
+
+### Custom Resource Example
+```yaml
+apiVersion: ai.redhat.com/v1alpha1
+kind: Morpheus
+metadata:
+  labels:
+    app.kubernetes.io/name: morpheus
+    app.kubernetes.io/instance: morpheus-sample
+    app.kubernetes.io/part-of: morpheus-operator
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: morpheus-operator
+  name: morpheus-example
+spec:
+  serviceAccountName: morpheus-sa
+  autoBindSccToSa: true
+  milvus:
+    minio:
+      rootUser: admin
+      rootPassword: admin123#
+  jupyter:
+    labPassword: yourPassword
+```
+
+### Morpheus Operator API Spec
+| Parameter                                 | Description                                                                                                                                                                                                                 | Values                | Default     |
+|-------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------|-------------|
+| spec.serviceAccountName                   | Service account name that will run morpheus jupyter deployment and triton deployment ,                                                                                                                                      | Integer >= 0          | morpheus-sa |
+| spec.autoBindSccToSa                      | For openshift only, create a role + rolebinding for the `serviceAccountName so deployment, granting permission of anyUid scc, if not running on openshift ( k8), must explicitly changed to false                           | Boolean (true, false) | true
+| spec.milvus.minio.rootUser                | root user of minio object store used by milvusDB instance to be deployed                                                                                                                                                    | string                | admin
+| spec.milvus.minio.rootPassword            | root password of minio object store used by milvusDB instance to be deployed                                                                                                                                                | string                | admin123#
+| spec.milvus.minio.storagePvcSize          | size of Pvc size used by Minio instance                                                                                                                                                                                     | string                | 2Gi
+| spec.milvus.etcd.storagePvcSize           | size of Pvc size used by etcd key store instance used by MilvusDB                                                                                                                                                           | string                | 2Gi
+| spec.milvus.StoragePvcSize                | size of Pvc size used by MilvusDB                                                                                                                                                                                           | string                | 2Gi
+| spec.tritonServer.morpheusRepoStorageSize | size of Pvc size used by Triton inference server                                                                                                                                                                            | string                | 20Gi
+| spec.jupyter.labPassword                  | Password of deployed jupyter notebook server, if not explicitly set, then a generated random token is being used, the password is stored in a secret in the CR namespace with name of  ${morpheus-cr-name} + -jupyter-token | string                | generated random token
 
 ### How it works
 This project aims to follow the Kubernetes [Operator pattern](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/).
