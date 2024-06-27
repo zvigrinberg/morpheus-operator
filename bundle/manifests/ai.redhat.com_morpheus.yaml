@@ -36,6 +36,11 @@ spec:
             properties:
               autoBindSccToSa:
                 type: boolean
+              jupyter:
+                properties:
+                  labPassword:
+                    type: string
+                type: object
               milvus:
                 properties:
                   etcd:

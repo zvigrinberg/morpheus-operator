@@ -145,7 +145,7 @@ oc apply -f morpheus-cr.yaml
 ```
 9. Watch the created resources:
 ```shell
-watch "oc get morpheus,sa,role,rolebinding,pvc,deployment,pods,svc,route -o wide"
+watch "oc get morpheus,sa,role,rolebinding,pvc,deployment,pods,svc, -o wide"
 ```
 Output:
 ```shell
@@ -248,6 +248,21 @@ Status:
 Events:                    <none>
 ```
 
+11. Access Jupyter Notebook/Lab Server
+```shell
+export ROUTE_NAME=morpheus-example
+xdg-open http://$(oc get route $ROUTE_NAME -o=jsonpath="{..spec.host}")/lab
+```
+
+12. Enter the password/token you've provided in the Morpheus CR, you can extract it in a one-liner command:
+```shell
+oc get morpheus morpheus-example -o=jsonpath='{.spec.jupyter.labPassword}' ; echo 
+```
+In case you didn't input password in the morpheus CR, the password/token will be generated automatically in a random way by the operator, the way to get it is as follows ( assuming that morpheus CR name=morpheus-example):
+```shell
+oc get secret morpheus-example-jupyter-token -o=jsonpath='{.data.JUPYTER_TOKEN}' | base64 -d ; echo
+
+```
 ### Custom Resource Example
 ```yaml
 apiVersion: ai.redhat.com/v1alpha1
