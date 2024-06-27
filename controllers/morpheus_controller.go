@@ -161,8 +161,8 @@ func deployMorpheusWithJupyter(ctx context.Context, morpheus *aiv1alpha1.Morpheu
 	err = r.Get(ctx, types.NamespacedName{Name: secretName, Namespace: morpheus.Namespace}, jupyterPassword)
 	if err != nil && errors.IsNotFound(err) {
 		randomTokenAsDefault := randstr.Hex(16)
-		tokenValue := getFromSpecElseDefault(morpheus.Spec.Jupyter.JupyterPassword, randomTokenAsDefault)
-		jupyterSecret := r.createSecret(morpheus, secretName, secretKey, getFromSpecElseDefault(morpheus.Spec.Jupyter.JupyterPassword, randomTokenAsDefault))
+		tokenValue := getFromSpecElseDefault(morpheus.Spec.Jupyter.LabPassword, randomTokenAsDefault)
+		jupyterSecret := r.createSecret(morpheus, secretName, secretKey, getFromSpecElseDefault(morpheus.Spec.Jupyter.LabPassword, randomTokenAsDefault))
 		md5HashOfSecret = getMd5HashString(tokenValue)
 		log.Info("Creating a new Secret", "Secret.Namespace", jupyterSecret.Namespace, "Secret.Name", jupyterSecret.Name)
 		err = r.Create(ctx, jupyterSecret)
@@ -178,12 +178,10 @@ func deployMorpheusWithJupyter(ctx context.Context, morpheus *aiv1alpha1.Morpheu
 		return thereWasAnUpdate, err
 	} else {
 		// check if jupyter password was changed.
-		passwordValue, err := decodeBase64String(jupyterPassword.Data[secretKey])
-		if err != nil {
-			return false, err
-		} else if strings.TrimSpace(morpheus.Spec.Jupyter.JupyterPassword) != "" &&
-			strings.TrimSpace(morpheus.Spec.Jupyter.JupyterPassword) != strings.TrimSpace(string(passwordValue)) {
-			jupyterPassword.Data[secretKey] = encodeStringBase64(morpheus.Spec.Jupyter.JupyterPassword)
+		passwordValue := string(jupyterPassword.Data[secretKey])
+		if strings.TrimSpace(morpheus.Spec.Jupyter.LabPassword) != "" &&
+			strings.TrimSpace(morpheus.Spec.Jupyter.LabPassword) != strings.TrimSpace(string(passwordValue)) {
+			jupyterPassword.Data[secretKey] = []byte(morpheus.Spec.Jupyter.LabPassword)
 			md5HashOfSecret = getMd5HashString(string(jupyterPassword.Data[secretKey]))
 			err = r.Update(ctx, jupyterPassword)
 			if err != nil {
@@ -218,7 +216,7 @@ func deployMorpheusWithJupyter(ctx context.Context, morpheus *aiv1alpha1.Morpheu
 		serviceAccountDeployment := morpheusDeployment.Spec.Template.Spec.ServiceAccountName
 		if serviceAccountDeployment != morpheus.Spec.ServiceAccountName || secretWasChanged {
 			if secretWasChanged {
-				morpheusDeployment.Spec.Template.Labels[jupyterPasswordHash] = md5HashOfSecret
+				morpheusDeployment.Spec.Template.Annotations[jupyterPasswordHash] = md5HashOfSecret
 			} else {
 				morpheusDeployment.Spec.Template.Spec.ServiceAccountName = morpheus.Spec.ServiceAccountName
 			}
@@ -233,8 +231,7 @@ func deployMorpheusWithJupyter(ctx context.Context, morpheus *aiv1alpha1.Morpheu
 			UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMorpheus, metav1.ConditionTrue, ternary(secretWasChanged, "Reconciling:Secret:Update", "Reconciling:Update"), "Morpheus-Jupyter Deployment successfully Updated!")
 		}
 	}
-	// Create A Morpheus-Jupyter Service
-	MorpheusJupyterSvc := &corev1.Service{}
+	// Create A Morpheus-Jupyter Service MorpheusJupyterSvc := &corev1.Service{}
 
 	err = r.Get(ctx, types.NamespacedName{Name: morpheus.Name, Namespace: morpheus.Namespace}, MorpheusJupyterSvc)
 
@@ -901,6 +898,7 @@ func deployTritonServer(r *MorpheusReconciler, ctx context.Context, morpheus *ai
 // deploymentForMemcached returns a memcached Deployment object
 func (r *MorpheusReconciler) createMorpheusDeployment(m *aiv1alpha1.Morpheus, secretHashValue string, secretName string) *appsv1.Deployment {
 	labels := labelsForComponent("morpheus", "v24.03.02", "jupyter")
+	annotations := annotationForDeployment(jupyterPasswordHash, secretHashValue)
 	labels[jupyterPasswordHash] = secretHashValue
 	var numOfReplicas int32 = 1
 	var user int64 = 0
@@ -917,14 +915,15 @@ func (r *MorpheusReconciler) createMorpheusDeployment(m *aiv1alpha1.Morpheus, se
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: labels,
+					Labels:      labels,
+					Annotations: annotations,
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{{
 						Name:    "morpheus-jupyter",
 						Image:   "quay.io/zgrinber/morpheus-jupyter:1",
 						Command: []string{"bash"},
-						Args:    []string{"-c", "echo Starting Updating Conda environment with all prerequisites... ; mamba env update -n $(CONDA_DEFAULT_ENV) --file /workspace/conda/environments/all_cuda-121_arch-x86_64.yaml ; echo Done Updating Morpheus Conda environment, Morpheus is Ready, Starting Jupyter Lab!. ; jupyter-lab --ip=0.0.0.0 --no-browser --allow-root"},
+						Args:    []string{"-c", "Morpheus is Ready, Starting Jupyter Lab!. ; jupyter-lab --ip=0.0.0.0 --no-browser --allow-root"},
 						EnvFrom: []corev1.EnvFromSource{
 							{
 								ConfigMapRef: nil,
@@ -957,6 +956,11 @@ func (r *MorpheusReconciler) createMorpheusDeployment(m *aiv1alpha1.Morpheus, se
 	// Set Morpheus instance as the owner and controller
 	ctrl.SetControllerReference(m, dep, r.Scheme)
 	return dep
+}
+
+func annotationForDeployment(key string, value string) map[string]string {
+	mapOfAnnotations := map[string]string{key: value}
+	return mapOfAnnotations
 }
 
 func labelsForComponent(name string, version string, component string) map[string]string {
@@ -1457,7 +1461,7 @@ func (r *MorpheusReconciler) createSecret(morpheus *aiv1alpha1.Morpheus, secretN
 			Namespace: morpheus.Namespace,
 		},
 		Data: map[string][]byte{
-			secretKey: encodeStringBase64(secretValue),
+			secretKey: []byte(secretValue),
 		},
 	}
 	ctrl.SetControllerReference(morpheus, secret, r.Scheme)
