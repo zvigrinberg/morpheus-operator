@@ -15,4 +15,6 @@ spec:
     minio:
       rootUser: admin
       rootPassword: admin123#
+  jupyter:
+    labPassword: theQueen
 

@@ -39,7 +39,7 @@ spec:
                 type: boolean
               jupyter:
                 properties:
-                  jupyterPassword:
+                  labPassword:
                     type: string
                 type: object
               milvus:

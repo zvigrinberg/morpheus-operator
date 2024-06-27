@@ -44,7 +44,7 @@ type MilvusSpec struct {
 }
 
 type JupyterSpec struct {
-	JupyterPassword string `json:"jupyterPassword,omitempty"`
+	LabPassword string `json:"labPassword,omitempty"`
 }
 
 // MorpheusSpec defines the desired state of Morpheus
