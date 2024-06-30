@@ -225,6 +225,8 @@ Spec:
       Root Password:     admin123#
       Root User:         admin
   Service Account Name:  morpheus-sa
+  Jupyter:
+    Lab Password: yourpassword
 Status:
   Conditions:
     Last Transition Time:  2024-06-24T16:29:46Z
