@@ -113,7 +113,7 @@ operator-sdk run bundle ${IMAGE_BUNDLE_BASE}:${MORPHEUS_BUNDLE_VERSION}
 ```shell
 oc get csv morpheus-operator.v0.0.2 -w
 ```
-
+### Using the Operator
 7. Create a new project 
 ```shell
 oc new-project morpheus-test-cr
@@ -139,6 +139,8 @@ spec:
     minio:
       rootUser: admin
       rootPassword: admin123#
+  jupyter:
+    labPassword: yourPassword    
 EOF
 
 oc apply -f morpheus-cr.yaml
@@ -250,15 +252,16 @@ Events:                    <none>
 
 11. Access Jupyter Notebook/Lab Server
 ```shell
+## ROUTE_NAME is like the Morpheus custom resource name
 export ROUTE_NAME=morpheus-example
 xdg-open http://$(oc get route $ROUTE_NAME -o=jsonpath="{..spec.host}")/lab
 ```
 
-12. Enter the password/token you've provided in the Morpheus CR, you can extract it in a one-liner command:
+12. Enter the password/token you've provided in the Morpheus CR( `.spec.jupyter.labPassword` ) you can extract it in a one-liner command:
 ```shell
 oc get morpheus morpheus-example -o=jsonpath='{.spec.jupyter.labPassword}' ; echo 
 ```
-In case you didn't input password in the morpheus CR, the password/token will be generated automatically in a random way by the operator, the way to get it is as follows ( assuming that morpheus CR name=morpheus-example):
+In case you didn't input jupyter password in the morpheus CR, the password/token will be generated automatically in a random way by the operator, the way to get it is as follows ( assuming that morpheus CR name=morpheus-example):
 ```shell
 oc get secret morpheus-example-jupyter-token -o=jsonpath='{.data.JUPYTER_TOKEN}' | base64 -d ; echo
 
