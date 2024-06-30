@@ -191,6 +191,11 @@ service/milvus-etcd         ClusterIP   172.30.136.103   <none>        2379/TCP 
 service/milvus-minio        ClusterIP   172.30.59.72     <none>        9000/TCP,9001/TCP            76m
 service/milvus-standalone   ClusterIP   172.30.180.225   <none>        19530/TCP,9091/TCP           76m
 service/triton-server       ClusterIP   172.30.245.119   <none>        8001/TCP,8000/TCP,8002/TCP   76m
+service/morpheus-example    ClusterIP   172.30.168.235   <none>        8888/TCP                     76m
+
+NAME                                        HOST/PORT                                                                     PATH   SERVICES           PORT    TERMINATION   WILDCARD
+route.route.openshift.io/morpheus-example   morpheus-example-morpheus-operator.apps.cn-ai-lab.6aw6.p1.openshiftapps.com          morpheus-example   <all>                 None
+
 ```
 10. See the Morpheus Custom resource instance Status 
 ```shell
