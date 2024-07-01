@@ -924,7 +924,7 @@ func (r *MorpheusReconciler) createMorpheusDeployment(m *aiv1alpha1.Morpheus, se
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{{
 						Name:    "morpheus-jupyter",
-						Image:   "quay.io/zgrinber/morpheus-jupyter:1",
+						Image:   "quay.io/zgrinber/morpheus-jupyter:3",
 						Command: []string{"bash"},
 						Args:    []string{"-c", "(mamba env update -n ${CONDA_DEFAULT_ENV} --file /workspace/conda/environments/all_cuda-121_arch-x86_64.yaml &) ; jupyter-lab --ip=0.0.0.0 --no-browser --allow-root"},
 						EnvFrom: []corev1.EnvFromSource{
@@ -941,6 +941,10 @@ func (r *MorpheusReconciler) createMorpheusDeployment(m *aiv1alpha1.Morpheus, se
 							{
 								Name:  "CONDA_DEFAULT_ENV",
 								Value: "morpheus",
+							},
+							{
+								Name:  "OPENAI_BASE_URL",
+								Value: "https://integrate.api.nvidia.com/v1",
 							},
 						},
 						SecurityContext: &corev1.SecurityContext{
@@ -1482,7 +1486,10 @@ func (r *MorpheusReconciler) createRoute(morpheus *aiv1alpha1.Morpheus) *routev1
 	weight := int32(100)
 
 	routeSpec := routev1.RouteSpec{
-		Path: "", // No needed specific path required yet
+		TLS: &routev1.TLSConfig{
+			Termination:                   routev1.TLSTerminationEdge,
+			InsecureEdgeTerminationPolicy: routev1.InsecureEdgeTerminationPolicyRedirect,
+		},
 		To: routev1.RouteTargetReference{
 			Kind:   "Service",
 			Name:   morpheus.Name,
