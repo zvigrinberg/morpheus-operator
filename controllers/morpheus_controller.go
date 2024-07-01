@@ -35,6 +35,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"os"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -910,6 +911,7 @@ func (r *MorpheusReconciler) createMorpheusDeployment(m *aiv1alpha1.Morpheus, se
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      m.Name,
 			Namespace: m.Namespace,
+			Labels:    commonLabelsForAllComponents(),
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &numOfReplicas,
@@ -924,7 +926,7 @@ func (r *MorpheusReconciler) createMorpheusDeployment(m *aiv1alpha1.Morpheus, se
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{{
 						Name:    "morpheus-jupyter",
-						Image:   "quay.io/zgrinber/morpheus-jupyter:1",
+						Image:   "quay.io/zgrinber/morpheus-jupyter:3",
 						Command: []string{"bash"},
 						Args:    []string{"-c", "(mamba env update -n ${CONDA_DEFAULT_ENV} --file /workspace/conda/environments/all_cuda-121_arch-x86_64.yaml &) ; jupyter-lab --ip=0.0.0.0 --no-browser --allow-root"},
 						EnvFrom: []corev1.EnvFromSource{
@@ -941,6 +943,10 @@ func (r *MorpheusReconciler) createMorpheusDeployment(m *aiv1alpha1.Morpheus, se
 							{
 								Name:  "CONDA_DEFAULT_ENV",
 								Value: "morpheus",
+							},
+							{
+								Name:  "OPENAI_BASE_URL",
+								Value: "https://integrate.api.nvidia.com/v1",
 							},
 						},
 						SecurityContext: &corev1.SecurityContext{
@@ -966,6 +972,21 @@ func (r *MorpheusReconciler) createMorpheusDeployment(m *aiv1alpha1.Morpheus, se
 	// Set Morpheus instance as the owner and controller
 	ctrl.SetControllerReference(m, dep, r.Scheme)
 	return dep
+}
+
+func commonLabelsForAllComponents() map[string]string {
+	createdBy, exists := os.LookupEnv("CREATED_BY")
+	if !exists {
+		createdBy = "morpheus-operator"
+	}
+	morpheusJupyterVersion, versionExists := os.LookupEnv("MORPHEUS_JUPYTER_VERSION")
+	labels := map[string]string{
+		"created-by": createdBy,
+	}
+	if versionExists {
+		labels["morpheus-jupyter-version"] = morpheusJupyterVersion
+	}
+	return labels
 }
 
 func annotationForDeployment(key string, value string) map[string]string {
@@ -1034,6 +1055,7 @@ func (r *MorpheusReconciler) morpheusServiceAccount(morpheus *aiv1alpha1.Morpheu
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      morpheus.Spec.ServiceAccountName,
 			Namespace: morpheus.Namespace,
+			Labels:    commonLabelsForAllComponents(),
 		},
 	}
 	ctrl.SetControllerReference(morpheus, sa, r.Scheme)
@@ -1045,6 +1067,7 @@ func (r *MorpheusReconciler) createAnyUidRole(morpheus *aiv1alpha1.Morpheus) *rb
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      morpheus.Name,
 			Namespace: morpheus.Namespace,
+			Labels:    commonLabelsForAllComponents(),
 		},
 		Rules: []rbacv1.PolicyRule{{
 			Verbs:         []string{"use"},
@@ -1063,6 +1086,7 @@ func (r *MorpheusReconciler) createAnyUidRoleBinding(morpheus *aiv1alpha1.Morphe
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      morpheus.Name,
 			Namespace: morpheus.Namespace,
+			Labels:    commonLabelsForAllComponents(),
 		},
 		Subjects: []rbacv1.Subject{{
 			Kind:      "ServiceAccount",
@@ -1084,6 +1108,7 @@ func (r *MorpheusReconciler) createPvc(morpheus *aiv1alpha1.Morpheus, pvcName st
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      pvcName,
 			Namespace: morpheus.Namespace,
+			Labels:    commonLabelsForAllComponents(),
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
 			AccessModes: []corev1.PersistentVolumeAccessMode{
@@ -1109,6 +1134,7 @@ func (r *MorpheusReconciler) createTritonDeployment(morpheus *aiv1alpha1.Morpheu
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "triton-server",
 			Namespace: morpheus.Namespace,
+			Labels:    commonLabelsForAllComponents(),
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &numOfReplicas,
@@ -1171,6 +1197,7 @@ func (r *MorpheusReconciler) createService(morpheus *aiv1alpha1.Morpheus, ports 
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      svcName,
 			Namespace: morpheus.Namespace,
+			Labels:    commonLabelsForAllComponents(),
 		},
 		Spec: corev1.ServiceSpec{
 			Ports:    ports,
@@ -1189,6 +1216,7 @@ func (r *MorpheusReconciler) createEtcdDeployment(morpheus *aiv1alpha1.Morpheus,
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      milvusEctdName,
 			Namespace: morpheus.Namespace,
+			Labels:    commonLabelsForAllComponents(),
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &numOfReplicas,
@@ -1284,6 +1312,7 @@ func (r *MorpheusReconciler) createMinioDeployment(ctx context.Context, morpheus
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      milvusMinioName,
 			Namespace: morpheus.Namespace,
+			Labels:    commonLabelsForAllComponents(),
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &numOfReplicas,
@@ -1373,6 +1402,7 @@ func (r *MorpheusReconciler) createMilvusDbDeployment(ctx context.Context, morph
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "milvus-standalone",
 			Namespace: morpheus.Namespace,
+			Labels:    commonLabelsForAllComponents(),
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &numOfReplicas,
@@ -1469,6 +1499,7 @@ func (r *MorpheusReconciler) createSecret(morpheus *aiv1alpha1.Morpheus, secretN
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      secretName,
 			Namespace: morpheus.Namespace,
+			Labels:    commonLabelsForAllComponents(),
 		},
 		Data: map[string][]byte{
 			secretKey: []byte(secretValue),
@@ -1482,7 +1513,10 @@ func (r *MorpheusReconciler) createRoute(morpheus *aiv1alpha1.Morpheus) *routev1
 	weight := int32(100)
 
 	routeSpec := routev1.RouteSpec{
-		Path: "", // No needed specific path required yet
+		TLS: &routev1.TLSConfig{
+			Termination:                   routev1.TLSTerminationEdge,
+			InsecureEdgeTerminationPolicy: routev1.InsecureEdgeTerminationPolicyRedirect,
+		},
 		To: routev1.RouteTargetReference{
 			Kind:   "Service",
 			Name:   morpheus.Name,
@@ -1494,6 +1528,7 @@ func (r *MorpheusReconciler) createRoute(morpheus *aiv1alpha1.Morpheus) *routev1
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      morpheus.Name,
 			Namespace: morpheus.Namespace,
+			Labels:    commonLabelsForAllComponents(),
 		},
 		Spec: routeSpec,
 	}

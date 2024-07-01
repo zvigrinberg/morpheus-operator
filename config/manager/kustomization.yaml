@@ -6,3 +6,12 @@ images:
 - name: controller
   newName: quay.io/zgrinber/morpheus-operator
   newTag: 0.0.2
+commonAnnotations:
+  morpheus-jupyter-version: 0.0.2
+  created-by: morpheus-operator
+metadata:
+  annotations:
+    morpheus-jupyter-version: 0.0.2
+    created-by: morpheus-operator
+
+

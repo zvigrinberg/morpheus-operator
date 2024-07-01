@@ -89,6 +89,16 @@ spec:
             port: 8081
           initialDelaySeconds: 5
           periodSeconds: 10
+        env:
+          - name: CREATED_BY
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.annotations['created-by']
+          - name: MORPHEUS_JUPYTER_VERSION
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.annotations['morpheus-jupyter-version']
+
         # TODO(user): Configure the resources accordingly based on the project requirements.
         # More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
         resources:
