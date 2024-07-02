@@ -147,54 +147,56 @@ oc apply -f morpheus-cr.yaml
 ```
 9. Watch the created resources:
 ```shell
-watch "oc get morpheus,sa,role,rolebinding,pvc,deployment,pods,svc, -o wide"
+watch " oc get morpheus ;oc get morpheus,sa,secret,role,rolebinding,pvc,deployment,svc,route -l created-by=morpheus-operator -o wide ; echo ; oc get pods -o wide"
 ```
 Output:
 ```shell
-NAME                                      AGE
-morpheus.ai.redhat.com/morpheus-example   76m
+Every 2.0s:  oc get morpheus ;oc get morpheus,sa,secret,role,rolebinding,pvc,deployment,svc,route -l created-by=morpheus-operator -o wide ; echo ; oc get pods -o wide                zgrinber-thinkpadp1gen3.raanaii.csb: Wed Jul  3 00:35:59 2024
 
+NAME               AGE
+morpheus-example   12m
 NAME                         SECRETS   AGE
-serviceaccount/morpheus-sa   1         76m
+serviceaccount/morpheus-sa   1         12m
+
+NAME                                    TYPE     DATA   AGE
+secret/morpheus-example-jupyter-token   Opaque   1	12m
 
 NAME                                              CREATED AT
-role.rbac.authorization.k8s.io/morpheus-example   2024-06-24T16:29:46Z
+role.rbac.authorization.k8s.io/morpheus-example   2024-07-02T21:23:38Z
 
-NAME                                                                                                    ROLE                                    AGE
+NAME                                                     ROLE                    AGE   USERS   GROUPS   SERVICEACCOUNTS
+rolebinding.rbac.authorization.k8s.io/morpheus-example   Role/morpheus-example   12m                    zvika-test/morpheus-sa
 
+NAME                                      STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   AGE   VOLUMEMODE
+persistentvolumeclaim/milvus-data         Bound    pvc-b171b531-5016-4760-b681-fc6e35b3bdc1   2Gi        RWO            gp3            12m   Filesystem
+persistentvolumeclaim/milvus-etcd-data    Bound    pvc-611cb9fa-da32-4e6f-b761-57cc0585ebb1   2Gi        RWO            gp3            12m   Filesystem
+persistentvolumeclaim/milvus-minio-data   Bound    pvc-bb58b022-e7a2-4903-ae6b-e6e2cb6278b2   2Gi        RWO            gp3            12m   Filesystem
+persistentvolumeclaim/morpheus-repo	  Bound    pvc-36d37e58-b6bf-4ba9-846e-c5c0f1b7a1fd   20Gi	 RWO            gp3            12m   Filesystem
 
-rolebinding.rbac.authorization.k8s.io/morpheus-example                                                  Role/morpheus-example                   76m
+NAME                                READY   UP-TO-DATE   AVAILABLE   AGE   CONTAINERS         IMAGES                                     SELECTOR
+deployment.apps/milvus-etcd         1/1     1            1           12m   etcd               quay.io/coreos/etcd:v3.5.5                 app=milvus,component=etcd,version=v3.5.5
+deployment.apps/milvus-minio        1/1     1            1           12m   minio              minio/minio:RELEASE.2023-03-20T20-16-18Z   app=milvus,component=minio,version=v3.5.5
+deployment.apps/milvus-standalone   1/1     1            1           12m   milvus             milvusdb/milvus:v2.4.1                     app=milvus,component=milvus,version=v2.4.1
+deployment.apps/morpheus-example    1/1     1            1           12m   morpheus-jupyter   quay.io/zgrinber/morpheus-jupyter:3        app=morpheus,component=jupyter,jupyter-password-hash=ff85305ab86ceff0f59877358928d81d,version=v24.03.
+02
+deployment.apps/triton-server       1/1     1            1           12m   triton             nvcr.io/nvidia/tritonserver:23.06-py3	 app=triton-server,version=v23.06
 
+NAME                        TYPE        CLUSTER-IP	 EXTERNAL-IP   PORT(S)                      AGE   SELECTOR
+service/milvus-etcd         ClusterIP   172.30.224.180   <none>        2379/TCP                     12m   app=milvus,component=etcd
+service/milvus-minio        ClusterIP   172.30.185.17    <none>        9000/TCP,9001/TCP            12m   app=milvus,component=minio
+service/milvus-standalone   ClusterIP   172.30.17.40     <none>        19530/TCP,9091/TCP           12m   app=milvus,component=milvus
+service/morpheus-example    ClusterIP   172.30.12.36     <none>        8888/TCP                     12m   app=morpheus,component=jupyter
+service/triton-server       ClusterIP   172.30.226.197   <none>        8001/TCP,8000/TCP,8002/TCP   12m   app=triton-server
 
-NAME                                      STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   AGE
-persistentvolumeclaim/milvus-data         Bound    pvc-67d5c557-ae63-4684-8562-5454eb1f5a69   2Gi        RWO            gp3            76m
-persistentvolumeclaim/milvus-etcd-data    Bound    pvc-51dcdf6c-b349-4a76-94ab-aecfcf7f364a   2Gi        RWO            gp3            76m
-persistentvolumeclaim/milvus-minio-data   Bound    pvc-0dc3e64d-39f4-457f-85b6-0f7a4ff5d6c5   2Gi        RWO            gp3            76m
-persistentvolumeclaim/morpheus-repo       Bound    pvc-86ccd3b7-900b-4717-8c2b-049d7f3b2f2b   20Gi       RWO            gp3            76m
+NAME                                        HOST/PORT                                                              PATH   SERVICES           PORT    TERMINATION     WILDCARD
+route.route.openshift.io/morpheus-example   morpheus-example-zvika-test.apps.cn-ai-lab.6aw6.p1.openshiftapps.com          morpheus-example   <all>   edge/Redirect   None
 
-NAME                                READY   UP-TO-DATE   AVAILABLE   AGE
-deployment.apps/milvus-etcd         1/1     1            1           76m
-deployment.apps/milvus-minio        1/1     1            1           76m
-deployment.apps/milvus-standalone   1/1     1            1           76m
-deployment.apps/morpheus-example    1/1     1            1           76m
-deployment.apps/triton-server       1/1     1            1           76m
-
-NAME                                    READY   STATUS    RESTARTS      AGE
-pod/milvus-etcd-747cd8b6b9-2rtw8        1/1     Running   0             76m
-pod/milvus-minio-5d4dd775d7-wxkfg       1/1     Running   0             76m
-pod/milvus-standalone-58b7f696-k988n    1/1     Running   1 (75m ago)   76m
-pod/morpheus-example-546c9767f4-4qppj   1/1     Running   0             76m
-pod/triton-server-5865c9bfd5-v6lfd      1/1     Running   0             76m
-
-NAME                        TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)                      AGE
-service/milvus-etcd         ClusterIP   172.30.136.103   <none>        2379/TCP                     76m
-service/milvus-minio        ClusterIP   172.30.59.72     <none>        9000/TCP,9001/TCP            76m
-service/milvus-standalone   ClusterIP   172.30.180.225   <none>        19530/TCP,9091/TCP           76m
-service/triton-server       ClusterIP   172.30.245.119   <none>        8001/TCP,8000/TCP,8002/TCP   76m
-service/morpheus-example    ClusterIP   172.30.168.235   <none>        8888/TCP                     76m
-
-NAME                                        HOST/PORT                                                                     PATH   SERVICES           PORT    TERMINATION   WILDCARD
-route.route.openshift.io/morpheus-example   morpheus-example-morpheus-operator.apps.cn-ai-lab.6aw6.p1.openshiftapps.com          morpheus-example   <all>                 None
+NAME                               READY   STATUS    RESTARTS   AGE   IP               NODE                           NOMINATED NODE   READINESS GATES
+milvus-etcd-747cd8b6b9-llthz	   1/1     Running   0          12m   10.128.103.132   ip-10-0-219-241.ec2.internal   <none>           <none>
+milvus-minio-5d4dd775d7-nzcr2	   1/1     Running   0          12m   10.128.103.131   ip-10-0-219-241.ec2.internal   <none>           <none>
+milvus-standalone-58b7f696-m74mm   1/1     Running   0          12m   10.128.106.44    ip-10-0-177-56.ec2.internal    <none>           <none>
+morpheus-example-6648d4745-vv4kn   1/1     Running   0          12m   10.128.103.130   ip-10-0-219-241.ec2.internal   <none>           <none>
+triton-server-5865c9bfd5-lj9lk     1/1     Running   0          12m   10.128.6.111     ip-10-0-149-189.ec2.internal   <none>           <none>
 
 ```
 10. See the Morpheus Custom resource instance Status 
@@ -261,7 +263,7 @@ Events:                    <none>
 ```shell
 ## ROUTE_NAME is like the Morpheus custom resource name
 export ROUTE_NAME=morpheus-example
-xdg-open http://$(oc get route $ROUTE_NAME -o=jsonpath="{..spec.host}")/lab
+xdg-open https://$(oc get route $ROUTE_NAME -o=jsonpath="{..spec.host}")/lab
 ```
 
 12. Enter the password/token you've provided in the Morpheus CR( `.spec.jupyter.labPassword` ) you can extract it in a one-liner command:
