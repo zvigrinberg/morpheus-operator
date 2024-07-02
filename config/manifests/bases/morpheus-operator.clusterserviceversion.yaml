@@ -41,7 +41,7 @@ spec:
   - morpheus
   links:
   - name: Morpheus Operator
-    url: https://morpheus-operator.domain
+    url: https://github.com/zvigrinberg/morpheus-operator
   maintainers:
   - email: zgrinber@redhat.com
     name: zvigrinberg
