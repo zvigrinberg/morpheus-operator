@@ -108,12 +108,14 @@ morpheus-operator-controller-manager-58dc8dc97f-plg6p             2/2     Runnin
 ```
 2. Add this bundle to the catalog
 ```shell
-sed -e  '/schema: olm.bundle[[:blank:]]*/ a &!&' olm/morpheus-catalog/operator.yaml | sed '/&!&/ r new-operator.yaml' | sed '/&!&/d'  > morpheus-catalog/operator.yaml
+sed  '/schema: olm.bundle[[:blank:]]*/ a &!&' morpheus-catalog/operator.yaml | sed '/&!&/ r new-operator.yaml' | sed '/&!&/d' | tee temp.yaml
 ```
 
 3. Add new Update graph
 ```shell
-echo '[{"name": "morpheus-operator.v0.0.3","replaces": "morpheus-operator.v0.0.2" }]'  | yq -P | awk '{print"  " $0}' >> morpheus-catalog/operator.yaml
+echo '[{"name": "morpheus-operator.v0.0.3","replaces": "morpheus-operator.v0.0.2" }]'  | yq -P | awk '{print"  " $0}' >> temp.yaml
+mv temp.yaml morpheus-catalog/operator.yaml
+rm new-operator.yaml
 ```
 
 4. Build the updated catalog index image and push it to a container registry and override latest ( make sure the image is public in the container registry' server side)
