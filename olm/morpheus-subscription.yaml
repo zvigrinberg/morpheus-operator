@@ -1,0 +1,10 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: morpheus-operator-sub
+spec:
+  channel: alpha
+  name: morpheus-operator
+  source: morpheus-catalog
+  sourceNamespace: morpheus-operator
+  installPlanApproval: Automatic
