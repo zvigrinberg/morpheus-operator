@@ -1,0 +1,13 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: CatalogSource
+metadata:
+  name: morpheus-catalog
+spec:
+  sourceType: grpc
+  image: quay.io/zgrinber/morpheus-catalog:latest
+
+  displayName: Morpheus Catalog
+  publisher: Zvi Grinberg
+  updateStrategy:
+    registryPoll:
+      interval: 5m
