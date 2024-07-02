@@ -32,11 +32,11 @@ metadata:
           }
         }
       ]
-    capabilities: Basic Install
-    createdAt: "2024-06-27T18:23:39Z"
+    capabilities: Seamless Updates
+    createdAt: "2024-07-02T19:49:33Z"
     operators.operatorframework.io/builder: operator-sdk-v1.31.0-ocp
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v3
-  name: morpheus-operator.v0.0.2
+  name: morpheus-operator.v0.0.3
   namespace: placeholder
 spec:
   apiservicedefinitions: {}
@@ -210,7 +210,9 @@ spec:
           template:
             metadata:
               annotations:
+                created-by: morpheus-operator
                 kubectl.kubernetes.io/default-container: manager
+                morpheus-jupyter-version: 0.0.2
               labels:
                 control-plane: controller-manager
             spec:
@@ -260,7 +262,16 @@ spec:
                 - --leader-elect
                 command:
                 - /manager
-                image: quay.io/zgrinber/morpheus-operator:0.0.2
+                env:
+                - name: CREATED_BY
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.annotations['created-by']
+                - name: MORPHEUS_JUPYTER_VERSION
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.annotations['morpheus-jupyter-version']
+                image: quay.io/zgrinber/morpheus-operator:0.0.3
                 livenessProbe:
                   httpGet:
                     path: /healthz
@@ -339,7 +350,7 @@ spec:
   - morpheus
   links:
   - name: Morpheus Operator
-    url: https://morpheus-operator.domain
+    url: https://github.com/zvigrinberg/morpheus-operator
   maintainers:
   - email: zgrinber@redhat.com
     name: zvigrinberg
@@ -347,4 +358,4 @@ spec:
   provider:
     name: redhat
     url: redhat.com
-  version: 0.0.2
+  version: 0.0.3

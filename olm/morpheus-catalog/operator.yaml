@@ -266,8 +266,108 @@ relatedImages:
   name: ""
 schema: olm.bundle
 ---
+image: quay.io/zgrinber/morpheus-operator-bundle:v0.0.3
+name: morpheus-operator.v0.0.3
+package: morpheus-operator
+properties:
+- type: olm.gvk
+  value:
+    group: ai.redhat.com
+    kind: Morpheus
+    version: v1alpha1
+- type: olm.package
+  value:
+    packageName: morpheus-operator
+    version: 0.0.3
+- type: olm.package.required
+  value:
+    packageName: gpu-operator-certified
+    versionRange: '> 23.9.1'
+- type: olm.csv.metadata
+  value:
+    annotations:
+      alm-examples: |-
+        [
+          {
+            "apiVersion": "ai.redhat.com/v1alpha1",
+            "kind": "Morpheus",
+            "metadata": {
+              "labels": {
+                "app.kubernetes.io/created-by": "morpheus-operator",
+                "app.kubernetes.io/instance": "morpheus-sample",
+                "app.kubernetes.io/managed-by": "kustomize",
+                "app.kubernetes.io/name": "morpheus",
+                "app.kubernetes.io/part-of": "morpheus-operator"
+              },
+              "name": "morpheus-example"
+            },
+            "spec": {
+              "autoBindSccToSa": true,
+              "jupyter": {
+                "labPassword": "yourPassword"
+              },
+              "milvus": {
+                "minio": {
+                  "rootPassword": "admin123#",
+                  "rootUser": "admin"
+                }
+              },
+              "serviceAccountName": "morpheus-sa"
+            }
+          }
+        ]
+      capabilities: Seamless Updates
+      createdAt: "2024-07-02T19:49:33Z"
+      operators.operatorframework.io/builder: operator-sdk-v1.31.0-ocp
+      operators.operatorframework.io/project_layout: go.kubebuilder.io/v3
+    apiServiceDefinitions: {}
+    crdDescriptions:
+      owned:
+      - description: Morpheus is the Schema for the morpheuses API
+        displayName: Morpheus
+        kind: Morpheus
+        name: morpheus.ai.redhat.com
+        statusDescriptors:
+        - displayName: Conditions
+          path: conditions
+        version: v1alpha1
+    description: Helps installs Nvidia Morpheus on an openshift and Kubernetes clusters
+    displayName: morpheus-operator
+    installModes:
+    - supported: false
+      type: OwnNamespace
+    - supported: false
+      type: SingleNamespace
+    - supported: false
+      type: MultiNamespace
+    - supported: true
+      type: AllNamespaces
+    keywords:
+    - ai
+    - morpheus
+    links:
+    - name: Morpheus Operator
+      url: https://github.com/zvigrinberg/morpheus-operator
+    maintainers:
+    - email: zgrinber@redhat.com
+      name: zvigrinberg
+    maturity: alpha
+    provider:
+      name: redhat
+      url: redhat.com
+relatedImages:
+- image: quay.io/zgrinber/morpheus-operator-bundle:v0.0.3
+  name: ""
+- image: quay.io/zgrinber/morpheus-operator:0.0.3
+  name: ""
+- image: registry.redhat.io/openshift4/ose-kube-rbac-proxy:v4.15
+  name: ""
+schema: olm.bundle
+---
 schema: olm.channel
 package: morpheus-operator
 name: alpha
 entries:
   - name: morpheus-operator.v0.0.2
+  - name: morpheus-operator.v0.0.3
+    replaces: morpheus-operator.v0.0.2

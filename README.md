@@ -83,13 +83,13 @@ make uninstall
 1. Define the following environment variables according to the version to build, and according to user/namespace/org in image registry
 ```shell
 # change to the current operator version 
-export MORPHEUS_VERSION=0.0.2
+export MORPHEUS_VERSION=0.0.3
 export VERSION=${MORPHEUS_VERSION}
 # Set change to your username/org/namespace in your container registry.
 export USER_NAMESPACE=zgrinber
 export MORPHEUS_IMAGE_BASE=quay.io/${USER_NAMESPACE}/morpheus-operator
 export IMAGE_BUNDLE_BASE=quay.io/${USER_NAMESPACE}/morpheus-operator-bundle
-export MORPHEUS_BUNDLE_VERSION=v0.0.2
+export MORPHEUS_BUNDLE_VERSION=v0.0.3
 ```
 
 2. Login to your container registry using your credentials, for example:
