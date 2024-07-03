@@ -17,4 +17,12 @@ spec:
       rootPassword: admin123#
   jupyter:
     labPassword: yourPassword
+    environmentVars:
+#      Will be created in configmap as OPENAI_API_KEY
+      openaiApiKey: your-api-key-value-goes-here
+#      Will be created in configmap as YOUR_ENV_VARIABLE_HERE
+      yourEnvVariableHere: your-env-var-value-goes-here-again
+#      This is also supported
+      MY_ENV_VAR_KEY: my-env-var-val
+
 

@@ -36,36 +36,51 @@ spec:
             description: MorpheusSpec defines the desired state of Morpheus
             properties:
               autoBindSccToSa:
+                description: automatically add 'anyuid' SecurityContextConstraint
+                  permission to service account of Morpheus.
                 type: boolean
               jupyter:
+                description: Jupyter Notebook Lab Spec
                 properties:
+                  environmentVars:
+                    additionalProperties:
+                      type: string
+                    description: Map of arbitrary key value pairs that will become
+                      environment variables in morpheus jupyter deployment
+                    type: object
                   labPassword:
+                    description: Password for Jupyter Lab UI Entrance
                     type: string
                 type: object
               milvus:
+                description: Milvus DB Spec
                 properties:
                   etcd:
+                    description: Etcd Instance Spec
                     properties:
                       storagePvcSize:
                         type: string
                     type: object
                   minio:
+                    description: Minio Instance Spec
                     properties:
                       rootPassword:
+                        description: Root Password to authenticate with Minio Instance
                         type: string
                       rootUser:
+                        description: Root User to authenticate with Minio Instance
                         type: string
                       storagePvcSize:
                         type: string
                     type: object
                   storagePvcSize:
+                    description: Milvus DB Storage Size
                     type: string
                 type: object
               serviceAccountName:
-                description: Service account of running all deployments of Morpheus.
-                  Edit morpheus_types.go to remove/update
                 type: string
               tritonServer:
+                description: Triton Server Spec
                 properties:
                   morpheusRepoStorageSize:
                     type: string
