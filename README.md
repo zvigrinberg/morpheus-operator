@@ -80,6 +80,7 @@ make uninstall
 
 ## Build And Install Operator Using OLM ( Operator Lifecycle Manager)
 
+### Build and deploy The Operator Using Single Bundle Catalog
 1. Define the following environment variables according to the version to build, and according to user/namespace/org in image registry
 ```shell
 # change to the current operator version 
@@ -120,6 +121,14 @@ operator-sdk run bundle ${IMAGE_BUNDLE_BASE}:${MORPHEUS_BUNDLE_VERSION} --instal
 ```shell
 oc get csv morpheus-operator.v0.0.2 -w
 ```
+
+### Build and deploy The Operator Using Multi Bundles Catalog
+
+Another way to build and deploy the Morpheus Operator, is to create a Morpheus Operator Catalog, contains a Catalog of bundles of the operator, each bundle
+Represent one resource sets and metadata for a given version of the operator, this way we'll support Seamless upgrades capabilities 
+of the operator application any time a new operator image and  bundle image is built and pushed (appended) to the operator catalog image
+Please take a look [here](./olm/README.md) for building and deployment instructions. 
+
 ### Using the Operator
 7. Create a new project 
 ```shell
