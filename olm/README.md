@@ -58,6 +58,20 @@ oc new-project morpheus-operator
 ```shell
 oc apply -f morpheus-og.yaml
 ```
+**Note: This operator depends on Nvidia GPU drivers installed by [NVIDIA GPU Operator](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/index.html), If you don't have it already installed on your Openshift Cluster,
+[Kindly install on cluster manually](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html#operator-install-guide), or deploy the Morpheus operator in `OwnNamespace` installMode
+As this is the only installMode that the NVIDIA GPU Operator supports - this will automatically deploy the GPU Operator ( Starts looking from Version 3.9.1) before the Morpheus Operator will be deployed**
+To Achieve that, you need to edit the [operatorgroup file](morpheus-og.yaml) before applying it to the cluster that way:
+```yaml
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+    name: morpheus-og
+# Comment Out to disable ownNamespace installMode ( required to enable automatic installation of Nvidia GPU Operator    
+spec:
+  targetNamespaces:
+  - morpheus-operator
+```
 3. Create a new catalog source and waits for a registry pod to come up in order to serve the budnles from the catalog
 ```shell
 oc apply -f morpheus-catalog-source.yaml
