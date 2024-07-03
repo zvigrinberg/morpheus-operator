@@ -9,3 +9,4 @@ images:
 commonAnnotations:
   created-by: morpheus-operator
   morpheus-jupyter-version: 0.0.3
+  morpheusJupyterVersion: 0.0.3

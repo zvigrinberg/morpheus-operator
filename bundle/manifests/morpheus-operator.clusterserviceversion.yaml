@@ -32,8 +32,8 @@ metadata:
           }
         }
       ]
-    capabilities: Seamless Updates
-    createdAt: "2024-07-02T19:49:33Z"
+    capabilities: Seamless Upgrades
+    createdAt: "2024-07-03T06:42:16Z"
     operators.operatorframework.io/builder: operator-sdk-v1.31.0-ocp
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v3
   name: morpheus-operator.v0.0.3
@@ -212,7 +212,8 @@ spec:
               annotations:
                 created-by: morpheus-operator
                 kubectl.kubernetes.io/default-container: manager
-                morpheus-jupyter-version: 0.0.2
+                morpheus-jupyter-version: 0.0.3
+                morpheusJupyterVersion: 0.0.3
               labels:
                 control-plane: controller-manager
             spec:
