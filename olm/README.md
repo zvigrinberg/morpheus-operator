@@ -122,16 +122,18 @@ Before performing this process, you should first create a new image version of t
 
 1. Render the new Morpheus Operator bundle version ( for example, v0.0.3)
 ```shell
- opm render quay.io/zgrinber/morpheus-operator-bundle:v0.0.3 --output=yaml > new-operator.yaml
+ opm render quay.io/zgrinber/morpheus-operator-bundle:v0.0.4 --output=yaml > new-operator.yaml
 ```
 2. Add this bundle to the catalog
 ```shell
-sed  '/schema: olm.bundle[[:blank:]]*/ a &!&' morpheus-catalog/operator.yaml | sed '/&!&/ r new-operator.yaml' | sed '/&!&/d' | tee temp.yaml
+export LINE_NUMBER=$(grep -n -E "schema: olm.bundle[[:blank:]]*"  morpheus-catalog/operator.yaml | tail -n 1 | awk -F ':' '{print $1}')
+let "targetLine = $LINE_NUMBER + 1"
+sed  "${targetLine}i: &&&/" morpheus-catalog/operator.yaml | sed '/&&&/ r new-operator.yaml' | sed '/&&&/d' | tee temp.yaml
 ```
 
 3. Add new Update graph from last version to new version
 ```shell
-echo '[{"name": "morpheus-operator.v0.0.3","replaces": "morpheus-operator.v0.0.2" }]'  | yq -P | awk '{print"  " $0}' >> temp.yaml
+echo '[{"name": "morpheus-operator.v0.0.4","replaces": "morpheus-operator.v0.0.3" }]'  | yq -P | awk '{print"  " $0}' >> temp.yaml
 mv temp.yaml morpheus-catalog/operator.yaml
 rm new-operator.yaml
 ```

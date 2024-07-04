@@ -18,9 +18,6 @@ package controllers
 
 import (
 	"context"
-	"crypto/md5"
-	"encoding/base64"
-	"encoding/hex"
 	"fmt"
 	"github.com/go-logr/logr"
 	routev1 "github.com/openshift/api/route/v1"
@@ -36,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"os"
+	"reflect"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -51,7 +49,8 @@ type MorpheusReconciler struct {
 }
 
 const (
-	jupyterPasswordHash = "jupyter-password-hash"
+	jupyterPasswordHash      = "jupyter-password-hash"
+	jupyterMorpheusCmEnvHash = "environment-hash"
 )
 
 //+kubebuilder:rbac:groups=ai.redhat.com,resources=morpheus,verbs=get;list;watch;create;update;patch;delete
@@ -156,6 +155,8 @@ func deployMorpheusWithJupyter(ctx context.Context, morpheus *aiv1alpha1.Morpheu
 			return thereWasAnUpdate, err
 		}
 	}
+
+	// Create Secret for Jupyter Notebook Lab UI access
 	jupyterPassword := &corev1.Secret{}
 	secretName := morpheus.Name + "-jupyter-token"
 	const secretKey = "JUPYTER_TOKEN"
@@ -166,7 +167,7 @@ func deployMorpheusWithJupyter(ctx context.Context, morpheus *aiv1alpha1.Morpheu
 		randomTokenAsDefault := randstr.Hex(16)
 		tokenValue := getFromSpecElseDefault(morpheus.Spec.Jupyter.LabPassword, randomTokenAsDefault)
 		jupyterSecret := r.createSecret(morpheus, secretName, secretKey, getFromSpecElseDefault(morpheus.Spec.Jupyter.LabPassword, randomTokenAsDefault))
-		md5HashOfSecret = getMd5HashString(tokenValue)
+		md5HashOfSecret = GetMd5HashString(tokenValue)
 		log.Info("Creating a new Secret", "Secret.Namespace", jupyterSecret.Namespace, "Secret.Name", jupyterSecret.Name)
 		err = r.Create(ctx, jupyterSecret)
 		if err != nil {
@@ -185,7 +186,7 @@ func deployMorpheusWithJupyter(ctx context.Context, morpheus *aiv1alpha1.Morpheu
 		if strings.TrimSpace(morpheus.Spec.Jupyter.LabPassword) != "" &&
 			strings.TrimSpace(morpheus.Spec.Jupyter.LabPassword) != strings.TrimSpace(string(passwordValue)) {
 			jupyterPassword.Data[secretKey] = []byte(morpheus.Spec.Jupyter.LabPassword)
-			md5HashOfSecret = getMd5HashString(string(jupyterPassword.Data[secretKey]))
+			md5HashOfSecret = GetMd5HashString(string(jupyterPassword.Data[secretKey]))
 			err = r.Update(ctx, jupyterPassword)
 			if err != nil {
 				log.Error(err, "Failed to update Jupyter Secret", "Secret.Namespace", jupyterPassword.Namespace, "Secret.Name", jupyterPassword.Name)
@@ -196,12 +197,55 @@ func deployMorpheusWithJupyter(ctx context.Context, morpheus *aiv1alpha1.Morpheu
 			secretWasChanged = true
 		}
 	}
+	// Create ConfigMap for Environment Variables of Morpheus Jupyter Deployment
+
+	jupyterMorpheusEnvVars := &corev1.ConfigMap{}
+	cmName := morpheus.Name + "-env-vars"
+	cmWasChanged := false
+	var md5HashOfEnv string
+	err = r.Get(ctx, types.NamespacedName{Name: cmName, Namespace: morpheus.Namespace}, jupyterMorpheusEnvVars)
+	if err != nil && errors.IsNotFound(err) {
+		jupyterMorpheusEnvVariables := r.createConfigMap(morpheus, cmName)
+		md5HashOfEnv = GetMd5HashString(getStringRepresentationOfMap(jupyterMorpheusEnvVars))
+		log.Info("Creating a new ConfigMap", "ConfigMap.Namespace", jupyterMorpheusEnvVariables.Namespace, "ConfigMap.Name", jupyterMorpheusEnvVariables.Name)
+		err = r.Create(ctx, jupyterMorpheusEnvVariables)
+		if err != nil {
+			log.Error(err, "Failed to create Jupyter Morpheus ConfigMap", "Secret.Namespace", jupyterMorpheusEnvVariables.Namespace, "Secret.Name", jupyterMorpheusEnvVariables.Name)
+			UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMorpheus, metav1.ConditionFalse, "Reconciling:Secret:Create:Error", err.Error())
+			return thereWasAnUpdate, err
+		}
+	} else if err != nil {
+		const errorMessage = "Failed to get Jupyter Morpheus Configmap"
+		log.Error(err, errorMessage)
+		UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMorpheus, metav1.ConditionFalse, "Reconciling:Configmap:Fetch:Error", errorMessage+"->"+err.Error())
+		return thereWasAnUpdate, err
+	} else {
+		// check if jupyter morpheus configmap of env vars was changed.
+		comparableMap := convertKeysToCamelCaseInMap(jupyterMorpheusEnvVars.Data, morpheus.Spec.Jupyter.EnvironmentVars)
+		if !reflect.DeepEqual(comparableMap, morpheus.Spec.Jupyter.EnvironmentVars) {
+
+			var envVars map[string]string = make(map[string]string)
+			for key, value := range morpheus.Spec.Jupyter.EnvironmentVars {
+				envVars[camelCaseToScreamingSnakeCase(key)] = value
+			}
+			jupyterMorpheusEnvVars.Data = envVars
+			md5HashOfEnv = GetMd5HashString(getStringRepresentationOfMap(jupyterMorpheusEnvVars))
+			err = r.Update(ctx, jupyterMorpheusEnvVars)
+			if err != nil {
+				log.Error(err, "Failed to update Jupyter ConfigMap", "Secret.Namespace", jupyterMorpheusEnvVars.Namespace, "Secret.Name", jupyterMorpheusEnvVars.Name)
+				UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMorpheus, metav1.ConditionFalse, "Reconciling:ConfigMap:Update:Error", err.Error())
+				return thereWasAnUpdate, err
+			}
+			thereWasAnUpdate = true
+			cmWasChanged = true
+		}
+	}
 	// Checks Whether Morpheus deployment exists.
 	morpheusDeployment := &appsv1.Deployment{}
 	err = r.Get(ctx, types.NamespacedName{Name: morpheus.Name, Namespace: morpheus.Namespace}, morpheusDeployment)
 	if err != nil && errors.IsNotFound(err) {
 		// Define a new deployment
-		deploymentMorpheus := r.createMorpheusDeployment(morpheus, md5HashOfSecret, secretName)
+		deploymentMorpheus := r.createMorpheusDeployment(morpheus, md5HashOfSecret, secretName, cmName, jupyterMorpheusCmEnvHash)
 		log.Info("Creating a new Deployment", "Deployment.Namespace", deploymentMorpheus.Namespace, "Deployment.Name", deploymentMorpheus.Name)
 		err = r.Create(ctx, deploymentMorpheus)
 		if err != nil {
@@ -217,11 +261,15 @@ func deployMorpheusWithJupyter(ctx context.Context, morpheus *aiv1alpha1.Morpheu
 		return thereWasAnUpdate, err
 	} else {
 		serviceAccountDeployment := morpheusDeployment.Spec.Template.Spec.ServiceAccountName
-		if serviceAccountDeployment != morpheus.Spec.ServiceAccountName || secretWasChanged {
+		if serviceAccountDeployment != morpheus.Spec.ServiceAccountName || secretWasChanged || cmWasChanged {
 			if secretWasChanged {
 				morpheusDeployment.Spec.Template.Annotations[jupyterPasswordHash] = md5HashOfSecret
 			} else {
-				morpheusDeployment.Spec.Template.Spec.ServiceAccountName = morpheus.Spec.ServiceAccountName
+				if cmWasChanged {
+					morpheusDeployment.Spec.Template.Annotations[jupyterMorpheusCmEnvHash] = md5HashOfEnv
+				} else {
+					morpheusDeployment.Spec.Template.Spec.ServiceAccountName = morpheus.Spec.ServiceAccountName
+				}
 			}
 
 			err = r.Update(ctx, morpheusDeployment)
@@ -285,23 +333,6 @@ func deployMorpheusWithJupyter(ctx context.Context, morpheus *aiv1alpha1.Morpheu
 		return false, err
 	}
 	return thereWasAnUpdate, nil
-}
-
-func ternary(condition bool, valueIfConditionIsTrue string, valueIfConditionIsFalse string) string {
-	if condition {
-		return valueIfConditionIsTrue
-	} else {
-		return valueIfConditionIsFalse
-	}
-}
-
-func getMd5HashString(data string) string {
-	hash := md5.Sum([]byte(data))
-	return string(hex.EncodeToString(hash[:]))
-}
-
-func decodeBase64String(data []byte) ([]byte, error) {
-	return base64.StdEncoding.DecodeString(string(data))
 }
 
 func createAnyUidSecurityContextConstraint(ctx context.Context, r *MorpheusReconciler, morpheus *aiv1alpha1.Morpheus, log logr.Logger) error {
@@ -900,13 +931,23 @@ func deployTritonServer(r *MorpheusReconciler, ctx context.Context, morpheus *ai
 }
 
 // deploymentForMemcached returns a memcached Deployment object
-func (r *MorpheusReconciler) createMorpheusDeployment(m *aiv1alpha1.Morpheus, secretHashValue string, secretName string) *appsv1.Deployment {
+func (r *MorpheusReconciler) createMorpheusDeployment(m *aiv1alpha1.Morpheus, secretHashValue string, secretName string, configMapName string, hashOfCmContent string) *appsv1.Deployment {
 	labels := labelsForComponent("morpheus", "v24.03.02", "jupyter")
 	annotations := annotationForDeployment(jupyterPasswordHash, secretHashValue)
 	labels[jupyterPasswordHash] = secretHashValue
 	var numOfReplicas int32 = 1
 	var user int64 = 0
 
+	envVars := []corev1.EnvVar{
+		{
+			Name:  "CONDA_DEFAULT_ENV",
+			Value: "morpheus",
+		},
+		{
+			Name:  "OPENAI_BASE_URL",
+			Value: "https://integrate.api.nvidia.com/v1",
+		},
+	}
 	dep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      m.Name,
@@ -931,24 +972,21 @@ func (r *MorpheusReconciler) createMorpheusDeployment(m *aiv1alpha1.Morpheus, se
 						Args:    []string{"-c", "(mamba env update -n ${CONDA_DEFAULT_ENV} --file /workspace/conda/environments/all_cuda-121_arch-x86_64.yaml &) ; jupyter-lab --ip=0.0.0.0 --no-browser --allow-root"},
 						EnvFrom: []corev1.EnvFromSource{
 							{
-								ConfigMapRef: nil,
 								SecretRef: &corev1.SecretEnvSource{
 									LocalObjectReference: corev1.LocalObjectReference{
 										Name: secretName,
 									},
 								},
 							},
-						},
-						Env: []corev1.EnvVar{
 							{
-								Name:  "CONDA_DEFAULT_ENV",
-								Value: "morpheus",
-							},
-							{
-								Name:  "OPENAI_BASE_URL",
-								Value: "https://integrate.api.nvidia.com/v1",
+								ConfigMapRef: &corev1.ConfigMapEnvSource{
+									LocalObjectReference: corev1.LocalObjectReference{
+										Name: configMapName,
+									},
+								},
 							},
 						},
+						Env: envVars,
 						SecurityContext: &corev1.SecurityContext{
 							RunAsUser: &user,
 						},
@@ -1046,6 +1084,8 @@ func (r *MorpheusReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&rbacv1.Role{}).
 		Owns(&rbacv1.RoleBinding{}).
 		Owns(&routev1.Route{}).
+		Owns(&corev1.Secret{}).
+		Owns(&corev1.ConfigMap{}).
 		WithEventFilter(ignoreRedundantEvents()).
 		Complete(r)
 }
@@ -1536,6 +1576,19 @@ func (r *MorpheusReconciler) createRoute(morpheus *aiv1alpha1.Morpheus) *routev1
 	return route
 }
 
-func encodeStringBase64(secretValue string) []byte {
-	return []byte(base64.StdEncoding.EncodeToString([]byte(secretValue)))
+func (r *MorpheusReconciler) createConfigMap(morpheus *aiv1alpha1.Morpheus, name string) *corev1.ConfigMap {
+	var envVars map[string]string = make(map[string]string)
+	for key, value := range morpheus.Spec.Jupyter.EnvironmentVars {
+		envVars[camelCaseToScreamingSnakeCase(key)] = value
+	}
+
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: morpheus.Namespace,
+		},
+		Data: envVars,
+	}
+	ctrl.SetControllerReference(morpheus, cm, r.Scheme)
+	return cm
 }

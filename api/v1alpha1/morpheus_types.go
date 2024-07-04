@@ -24,7 +24,9 @@ import (
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
 type MinioSpec struct {
-	RootUser       string `json:"rootUser,omitempty"`
+	// Root User to authenticate with Minio Instance
+	RootUser string `json:"rootUser,omitempty"`
+	// Root Password to authenticate with Minio Instance
 	RootPassword   string `json:"rootPassword,omitempty"`
 	StoragePvcSize string `json:"storagePvcSize,omitempty"`
 }
@@ -38,13 +40,19 @@ type TritonSpec struct {
 }
 
 type MilvusSpec struct {
-	Minio          MinioSpec `json:"minio,omitempty"`
-	Etcd           EtcdSpec  `json:"etcd,omitempty"`
-	StoragePvcSize string    `json:"storagePvcSize,omitempty"`
+	// Minio Instance Spec
+	Minio MinioSpec `json:"minio,omitempty"`
+	// Etcd Instance Spec
+	Etcd EtcdSpec `json:"etcd,omitempty"`
+	// Milvus DB Storage Size
+	StoragePvcSize string `json:"storagePvcSize,omitempty"`
 }
 
 type JupyterSpec struct {
+	// Password for Jupyter Lab UI Entrance
 	LabPassword string `json:"labPassword,omitempty"`
+	// Map of arbitrary key value pairs that will become environment variables in morpheus jupyter deployment
+	EnvironmentVars map[string]string `json:"environmentVars,omitempty"`
 }
 
 // MorpheusSpec defines the desired state of Morpheus
@@ -52,12 +60,15 @@ type MorpheusSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// Service account of running all deployments of Morpheus. Edit morpheus_types.go to remove/update
-	ServiceAccountName string      `json:"serviceAccountName,omitempty"`
-	AutoBindSccToSa    bool        `json:"autoBindSccToSa,omitempty"`
-	Milvus             MilvusSpec  `json:"milvus,omitempty"`
-	TritonServer       TritonSpec  `json:"tritonServer,omitempty"`
-	Jupyter            JupyterSpec `json:"jupyter,omitempty"`
+	ServiceAccountName string `json:"serviceAccountName,omitempty"`
+	// automatically add 'anyuid' SecurityContextConstraint permission to service account of Morpheus.
+	AutoBindSccToSa bool `json:"autoBindSccToSa,omitempty"`
+	// Milvus DB Spec
+	Milvus MilvusSpec `json:"milvus,omitempty"`
+	// Triton Server Spec
+	TritonServer TritonSpec `json:"tritonServer,omitempty"`
+	//Jupyter Notebook Lab Spec
+	Jupyter JupyterSpec `json:"jupyter,omitempty"`
 }
 
 // MorpheusStatus defines the observed state of Morpheus
