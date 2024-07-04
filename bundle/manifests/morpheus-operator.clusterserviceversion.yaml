@@ -20,6 +20,11 @@ metadata:
           "spec": {
             "autoBindSccToSa": true,
             "jupyter": {
+              "environmentVars": {
+                "MY_ENV_VAR_KEY": "my-env-var-val",
+                "openaiApiKey": "your-api-key-value-goes-here",
+                "yourEnvVariableHere": "your-env-var-value-goes-here-again"
+              },
               "labPassword": "yourPassword"
             },
             "milvus": {
@@ -33,7 +38,7 @@ metadata:
         }
       ]
     capabilities: Seamless Upgrades
-    createdAt: "2024-07-03T21:23:40Z"
+    createdAt: "2024-07-04T09:13:17Z"
     operators.operatorframework.io/builder: operator-sdk-v1.31.0-ocp
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v3
   name: morpheus-operator.v0.0.4
