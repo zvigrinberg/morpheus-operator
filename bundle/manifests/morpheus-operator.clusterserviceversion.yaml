@@ -38,7 +38,7 @@ metadata:
         }
       ]
     capabilities: Seamless Upgrades
-    createdAt: "2024-07-04T09:13:17Z"
+    createdAt: "2024-07-05T01:37:46Z"
     operators.operatorframework.io/builder: operator-sdk-v1.31.0-ocp
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v3
   name: morpheus-operator.v0.0.4
@@ -64,6 +64,18 @@ spec:
     spec:
       clusterPermissions:
       - rules:
+        - apiGroups:
+          - '*'
+          resources:
+          - configmaps
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
         - apiGroups:
           - '*'
           resources:
@@ -218,7 +230,6 @@ spec:
                 created-by: morpheus-operator
                 kubectl.kubernetes.io/default-container: manager
                 morpheus-jupyter-version: 0.0.4
-                morpheusJupyterVersion: 0.0.3
               labels:
                 control-plane: controller-manager
             spec:
@@ -294,10 +305,10 @@ spec:
                 resources:
                   limits:
                     cpu: 500m
-                    memory: 128Mi
+                    memory: 512Mi
                   requests:
-                    cpu: 10m
-                    memory: 64Mi
+                    cpu: 50m
+                    memory: 256Mi
                 securityContext:
                   allowPrivilegeEscalation: false
                   capabilities:

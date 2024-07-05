@@ -70,6 +70,8 @@ spec:
         - /manager
         args:
         - --leader-elect
+        - "--zap-encoder=console"
+        - "--zap-log-level=debug"
         image: controller:latest
         name: manager
         securityContext:
@@ -104,9 +106,9 @@ spec:
         resources:
           limits:
             cpu: 500m
-            memory: 128Mi
+            memory: 512Mi
           requests:
-            cpu: 10m
-            memory: 64Mi
+            cpu: 50m
+            memory: 256Mi
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10

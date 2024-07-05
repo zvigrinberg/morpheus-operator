@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"maps"
 	"os"
 	"reflect"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -58,6 +59,7 @@ const (
 //+kubebuilder:rbac:groups=ai.redhat.com,resources=morpheus/finalizers,verbs=update
 //+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=*,resources=secrets,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=*,resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=*,resources=services,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=*,resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=*,resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
@@ -232,7 +234,7 @@ func deployMorpheusWithJupyter(ctx context.Context, morpheus *aiv1alpha1.Morpheu
 			md5HashOfEnv = GetMd5HashString(getStringRepresentationOfMap(jupyterMorpheusEnvVars))
 			err = r.Update(ctx, jupyterMorpheusEnvVars)
 			if err != nil {
-				log.Error(err, "Failed to update Jupyter ConfigMap", "Secret.Namespace", jupyterMorpheusEnvVars.Namespace, "Secret.Name", jupyterMorpheusEnvVars.Name)
+				log.Error(err, "Failed to update Jupyter ConfigMap", "ConfigMap.Namespace", jupyterMorpheusEnvVars.Namespace, "ConfigMap.Name", jupyterMorpheusEnvVars.Name)
 				UpdateCrStatusPerType(ctx, morpheus, r, TypeDeployedMorpheus, metav1.ConditionFalse, "Reconciling:ConfigMap:Update:Error", err.Error())
 				return thereWasAnUpdate, err
 			}
@@ -934,6 +936,8 @@ func deployTritonServer(r *MorpheusReconciler, ctx context.Context, morpheus *ai
 func (r *MorpheusReconciler) createMorpheusDeployment(m *aiv1alpha1.Morpheus, secretHashValue string, secretName string, configMapName string, hashOfCmContent string) *appsv1.Deployment {
 	labels := labelsForComponent("morpheus", "v24.03.02", "jupyter")
 	annotations := annotationForDeployment(jupyterPasswordHash, secretHashValue)
+	annotations2 := annotationForDeployment(jupyterMorpheusCmEnvHash, hashOfCmContent)
+	maps.Copy(annotations, annotations2)
 	labels[jupyterPasswordHash] = secretHashValue
 	var numOfReplicas int32 = 1
 	var user int64 = 0

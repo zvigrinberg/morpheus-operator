@@ -1,5 +1,5 @@
-dependencies:
-  - type: olm.package
-    value:
-      packageName: gpu-operator-certified
-      version: "> 23.9.0"
+dependencies: {}
+#  - type: olm.package
+#    value:
+#      packageName: gpu-operator-certified
+#      version: "> 23.9.0"
