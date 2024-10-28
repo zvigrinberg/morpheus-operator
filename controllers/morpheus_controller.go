@@ -994,13 +994,9 @@ func (r *MorpheusReconciler) createMorpheusDeployment(m *aiv1alpha1.Morpheus, se
 						SecurityContext: &corev1.SecurityContext{
 							RunAsUser: &user,
 						},
-						//Lifecycle: &corev1.Lifecycle{
-						//	PostStart: &corev1.LifecycleHandler{
-						//		Exec: &corev1.ExecAction{
-						//			Command: []string{"bash", "-c", "(mamba env update -n ${CONDA_DEFAULT_ENV} --file /workspace/conda/environments/all_cuda-121_arch-x86_64.yaml) &"},
-						//		},
-						//	},
-						//},
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{"gpu-vendor.example/example-gpu": resource.MustParse("1")},
+						},
 					}},
 					ServiceAccountName: m.Spec.ServiceAccountName,
 					SecurityContext: &corev1.PodSecurityContext{
@@ -1190,6 +1186,8 @@ func (r *MorpheusReconciler) createTritonDeployment(morpheus *aiv1alpha1.Morpheu
 					Labels: labels,
 				},
 				Spec: corev1.PodSpec{
+					NodeSelector: morpheus.Spec.NodeSelector,
+					Tolerations:  morpheus.Spec.Tolerations,
 					InitContainers: []corev1.Container{{
 						Name:  "fetch-models",
 						Image: "nvcr.io/nvidia/tritonserver:23.06-py3",
@@ -1215,6 +1213,9 @@ func (r *MorpheusReconciler) createTritonDeployment(morpheus *aiv1alpha1.Morpheu
 							Name:      morpheusRepoPvcName,
 							MountPath: "/repo",
 						}},
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{"gpu-vendor.example/example-gpu": resource.MustParse("1")},
+						},
 					}},
 					ServiceAccountName: morpheus.Spec.ServiceAccountName,
 					Volumes: []corev1.Volume{{

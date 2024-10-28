@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -69,6 +70,9 @@ type MorpheusSpec struct {
 	TritonServer TritonSpec `json:"tritonServer,omitempty"`
 	//Jupyter Notebook Lab Spec
 	Jupyter JupyterSpec `json:"jupyter,omitempty"`
+
+	NodeSelector map[string]string   `json:"nodeSelector,omitempty"`
+	Tolerations  []corev1.Toleration `json:"tolerations,omitempty"`
 }
 
 // MorpheusStatus defines the observed state of Morpheus
