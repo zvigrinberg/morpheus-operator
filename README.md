@@ -84,13 +84,13 @@ make uninstall
 1. Define the following environment variables according to the version to build, and according to user/namespace/org in image registry
 ```shell
 # change to the current operator version 
-export MORPHEUS_VERSION=0.0.4
+export MORPHEUS_VERSION=0.0.5
 export VERSION=${MORPHEUS_VERSION}
 # Set change to your username/org/namespace in your container registry.
 export USER_NAMESPACE=zgrinber
 export MORPHEUS_IMAGE_BASE=quay.io/${USER_NAMESPACE}/morpheus-operator
 export IMAGE_BUNDLE_BASE=quay.io/${USER_NAMESPACE}/morpheus-operator-bundle
-export MORPHEUS_BUNDLE_VERSION=v0.0.4
+export MORPHEUS_BUNDLE_VERSION=v0.0.5
 ```
 
 2. Login to your container registry using your credentials, for example:
@@ -119,7 +119,7 @@ operator-sdk run bundle ${IMAGE_BUNDLE_BASE}:${MORPHEUS_BUNDLE_VERSION} --instal
 
 6. Check that the operator installed correctly ( wait until PHASE=`Succeeded`)
 ```shell
-oc get csv morpheus-operator.v0.0.2 -w
+oc get csv morpheus-operator.v0.0.5 -w
 ```
 
 ### Build and deploy The Operator Using Multi Bundles Catalog

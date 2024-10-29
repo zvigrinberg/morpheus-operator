@@ -38,10 +38,10 @@ metadata:
         }
       ]
     capabilities: Seamless Upgrades
-    createdAt: "2024-07-05T01:37:46Z"
+    createdAt: "2024-10-29T15:13:46Z"
     operators.operatorframework.io/builder: operator-sdk-v1.31.0-ocp
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v3
-  name: morpheus-operator.v0.0.4
+  name: morpheus-operator.v0.0.5
   namespace: placeholder
 spec:
   apiservicedefinitions: {}
@@ -229,7 +229,7 @@ spec:
               annotations:
                 created-by: morpheus-operator
                 kubectl.kubernetes.io/default-container: manager
-                morpheus-jupyter-version: 0.0.4
+                morpheus-jupyter-version: 0.0.5
               labels:
                 control-plane: controller-manager
             spec:
@@ -288,7 +288,7 @@ spec:
                   valueFrom:
                     fieldRef:
                       fieldPath: metadata.annotations['morpheus-jupyter-version']
-                image: quay.io/zgrinber/morpheus-operator:0.0.4
+                image: quay.io/zgrinber/morpheus-operator:0.0.5
                 livenessProbe:
                   httpGet:
                     path: /healthz
@@ -375,4 +375,4 @@ spec:
   provider:
     name: redhat
     url: redhat.com
-  version: 0.0.4
+  version: 0.0.5

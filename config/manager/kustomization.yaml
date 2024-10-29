@@ -5,7 +5,7 @@ kind: Kustomization
 images:
 - name: controller
   newName: quay.io/zgrinber/morpheus-operator
-  newTag: 0.0.4
+  newTag: 0.0.5
 commonAnnotations:
   created-by: morpheus-operator
-  morpheus-jupyter-version: 0.0.4
+  morpheus-jupyter-version: 0.0.5
