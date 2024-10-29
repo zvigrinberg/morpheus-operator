@@ -969,6 +969,8 @@ func (r *MorpheusReconciler) createMorpheusDeployment(m *aiv1alpha1.Morpheus, se
 					Annotations: annotations,
 				},
 				Spec: corev1.PodSpec{
+					NodeSelector: getInputNodeSelectorElseDefault(m.Spec.NodeSelector),
+					Tolerations:  getInputTolerationsElseDefault(m.Spec.Tolerations),
 					Containers: []corev1.Container{{
 						Name:    "morpheus-jupyter",
 						Image:   "quay.io/zgrinber/morpheus-jupyter:3",
@@ -994,13 +996,10 @@ func (r *MorpheusReconciler) createMorpheusDeployment(m *aiv1alpha1.Morpheus, se
 						SecurityContext: &corev1.SecurityContext{
 							RunAsUser: &user,
 						},
-						//Lifecycle: &corev1.Lifecycle{
-						//	PostStart: &corev1.LifecycleHandler{
-						//		Exec: &corev1.ExecAction{
-						//			Command: []string{"bash", "-c", "(mamba env update -n ${CONDA_DEFAULT_ENV} --file /workspace/conda/environments/all_cuda-121_arch-x86_64.yaml) &"},
-						//		},
-						//	},
-						//},
+						Resources: corev1.ResourceRequirements{
+							Limits:   corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1")},
+							Requests: corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1")},
+						},
 					}},
 					ServiceAccountName: m.Spec.ServiceAccountName,
 					SecurityContext: &corev1.PodSecurityContext{
@@ -1190,6 +1189,8 @@ func (r *MorpheusReconciler) createTritonDeployment(morpheus *aiv1alpha1.Morpheu
 					Labels: labels,
 				},
 				Spec: corev1.PodSpec{
+					NodeSelector: getInputNodeSelectorElseDefault(morpheus.Spec.NodeSelector),
+					Tolerations:  getInputTolerationsElseDefault(morpheus.Spec.Tolerations),
 					InitContainers: []corev1.Container{{
 						Name:  "fetch-models",
 						Image: "nvcr.io/nvidia/tritonserver:23.06-py3",
@@ -1215,6 +1216,10 @@ func (r *MorpheusReconciler) createTritonDeployment(morpheus *aiv1alpha1.Morpheu
 							Name:      morpheusRepoPvcName,
 							MountPath: "/repo",
 						}},
+						Resources: corev1.ResourceRequirements{
+							Limits:   corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1")},
+							Requests: corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1")},
+						},
 					}},
 					ServiceAccountName: morpheus.Spec.ServiceAccountName,
 					Volumes: []corev1.Volume{{
@@ -1234,6 +1239,27 @@ func (r *MorpheusReconciler) createTritonDeployment(morpheus *aiv1alpha1.Morpheu
 	// Set Morpheus instance as the owner and controller
 	ctrl.SetControllerReference(morpheus, dep, r.Scheme)
 	return dep
+}
+
+func getInputNodeSelectorElseDefault(nodeSelector map[string]string) map[string]string {
+	if &nodeSelector != nil && len(nodeSelector) > 0 {
+		return nodeSelector
+	} else {
+		return map[string]string{"nvidia.com/gpu.deploy.driver": "true"}
+	}
+}
+
+func getInputTolerationsElseDefault(tolerations []corev1.Toleration) []corev1.Toleration {
+
+	if &tolerations != nil && len(tolerations) > 0 {
+		return tolerations
+	}
+	return []corev1.Toleration{{
+		Key:      "p4-gpu",
+		Operator: "Exists",
+		Effect:   "NoSchedule",
+	}}
+
 }
 
 func (r *MorpheusReconciler) createService(morpheus *aiv1alpha1.Morpheus, ports []corev1.ServicePort, svcName string, selector map[string]string) *corev1.Service {
