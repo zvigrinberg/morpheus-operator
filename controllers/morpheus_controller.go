@@ -995,7 +995,8 @@ func (r *MorpheusReconciler) createMorpheusDeployment(m *aiv1alpha1.Morpheus, se
 							RunAsUser: &user,
 						},
 						Resources: corev1.ResourceRequirements{
-							Limits: corev1.ResourceList{"gpu-vendor.example/example-gpu": resource.MustParse("1")},
+							Limits:   corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1")},
+							Requests: corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1")},
 						},
 					}},
 					ServiceAccountName: m.Spec.ServiceAccountName,
@@ -1214,7 +1215,8 @@ func (r *MorpheusReconciler) createTritonDeployment(morpheus *aiv1alpha1.Morpheu
 							MountPath: "/repo",
 						}},
 						Resources: corev1.ResourceRequirements{
-							Limits: corev1.ResourceList{"gpu-vendor.example/example-gpu": resource.MustParse("1")},
+							Limits:   corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1")},
+							Requests: corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1")},
 						},
 					}},
 					ServiceAccountName: morpheus.Spec.ServiceAccountName,
