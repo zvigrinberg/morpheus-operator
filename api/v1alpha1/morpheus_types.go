@@ -71,8 +71,10 @@ type MorpheusSpec struct {
 	//Jupyter Notebook Lab Spec
 	Jupyter JupyterSpec `json:"jupyter,omitempty"`
 
-	NodeSelector map[string]string   `json:"nodeSelector,omitempty"`
-	Tolerations  []corev1.Toleration `json:"tolerations,omitempty"`
+	// pass (key,value) label pairs to morpheus jupyter and triton server deployments' podTemplate.nodeSelector in order to schedule their pods on a particular gpu node
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+	// pass tolerations list to morpheus jupyter and triton server deployments' podTemplate.tolerations in order to schedule their pods on a particular gpu node ( satisfy its taints).
+	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
 }
 
 // MorpheusStatus defines the observed state of Morpheus

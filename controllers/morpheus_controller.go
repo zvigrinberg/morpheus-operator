@@ -1255,7 +1255,7 @@ func getInputTolerationsElseDefault(tolerations []corev1.Toleration) []corev1.To
 		return tolerations
 	}
 	return []corev1.Toleration{{
-		Key:      "odh-notebook",
+		Key:      "p4-gpu",
 		Operator: "Exists",
 		Effect:   "NoSchedule",
 	}}
